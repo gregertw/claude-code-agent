@@ -1,0 +1,83 @@
+# =============================================================================
+# Agent Server Configuration
+# =============================================================================
+# Copy this file to agent.conf and fill in your values.
+# This file is sourced by all scripts in this package.
+# =============================================================================
+
+# --- Identity ----------------------------------------------------------------
+# Your name (used in prompts and logging)
+OWNER_NAME="Your Name"
+
+# --- Paths -------------------------------------------------------------------
+# The brain directory is where the agent reads instructions and writes outputs.
+#
+# With Dropbox: the brain lives inside Dropbox and syncs automatically.
+#   BRAIN_FOLDER is the subfolder name inside ~/Dropbox/
+# Without Dropbox: the brain lives at ~/brain/ on the server.
+#   BRAIN_FOLDER is ignored; access is via SSH and ActingWeb only.
+BRAIN_FOLDER="brain"
+
+# Subfolder inside the brain where final outputs and documents go.
+# This is also where the INBOX folder lives.
+OUTPUT_FOLDER="output"
+
+# --- File Sync ---------------------------------------------------------------
+# "dropbox" — install and use Dropbox for file sync (default)
+# "none"    — no file sync; brain directory is local-only (~/brain/)
+#             Access files via SSH, ttyd web terminal, or ActingWeb
+FILE_SYNC="dropbox"
+
+# --- Web Terminal ------------------------------------------------------------
+# Install ttyd for browser-based terminal access? (true/false)
+# Provides a web terminal at https://<ip>:7681 with basic auth.
+# Useful as an alternative or supplement to SSH, especially without Dropbox.
+INSTALL_TTYD=false
+
+# Username and password for ttyd web terminal (required if INSTALL_TTYD=true)
+# IMPORTANT: Change these from the defaults!
+TTYD_USER="agent"
+TTYD_PASSWORD="changeme"
+
+# --- Schedule ----------------------------------------------------------------
+# "always-on" — instance runs 24/7, use cron or manual runs
+# "scheduled" — instance wakes on a schedule, runs tasks, stops itself
+SCHEDULE_MODE="always-on"
+
+# Minutes between wakeups (only used in scheduled mode)
+SCHEDULE_INTERVAL=60
+
+# --- AWS ---------------------------------------------------------------------
+# AWS region for the EC2 instance and EventBridge Scheduler
+AWS_REGION="eu-north-1"
+
+# --- Installation Options ----------------------------------------------------
+# Install Docker? (true/false)
+INSTALL_DOCKER=true
+
+# Install VS Code Server for browser-based editing? (true/false)
+INSTALL_CODE_SERVER=false
+
+# Node.js major version (for MCP servers)
+NODE_MAJOR=22
+
+# Linux username on the EC2 instance
+UBUNTU_USER="ubuntu"
+
+# --- MCP Connections ---------------------------------------------------------
+# ActingWeb Personal AI Memory (required — provides cross-session memory)
+# Sign up at https://ai.actingweb.io to get an account
+# Authentication is handled via OAuth during setup-mcp.sh
+SETUP_ACTINGWEB=true
+
+# Gmail MCP (optional — enables email triage)
+SETUP_GMAIL=false
+
+# Google Calendar MCP (optional — enables calendar preview)
+SETUP_GOOGLE_CALENDAR=false
+
+# Google OAuth credentials (required if SETUP_GMAIL or SETUP_GOOGLE_CALENDAR is true)
+# Get these from https://console.cloud.google.com -> APIs & Services -> Credentials
+# GOOGLE_CLIENT_ID=""
+# GOOGLE_CLIENT_SECRET=""
+# GOOGLE_REFRESH_TOKEN=""
