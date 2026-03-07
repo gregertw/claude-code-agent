@@ -105,8 +105,14 @@ apt-get install -y -qq \
   fail2ban \
   ufw \
   unattended-upgrades \
-  apt-listchanges \
-  awscli
+  apt-listchanges
+
+# Install AWS CLI v2 (not available via apt on Ubuntu 24.04)
+log "Installing AWS CLI v2..."
+curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+unzip -qo /tmp/awscliv2.zip -d /tmp
+/tmp/aws/install --update
+rm -rf /tmp/awscliv2.zip /tmp/aws
 
 # --- 3. Firewall (UFW) -------------------------------------------------------
 log "Configuring firewall..."
@@ -160,14 +166,14 @@ log "Hardening SSH..."
 sed -i 's/^#\?PasswordAuthentication.*/PasswordAuthentication no/' /etc/ssh/sshd_config
 sed -i 's/^#\?PermitRootLogin.*/PermitRootLogin no/' /etc/ssh/sshd_config
 sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_config
-systemctl restart sshd
+systemctl restart ssh
 log "SSH hardened — password auth disabled, root login disabled."
 
 # --- 7. Node.js (for MCP servers) --------------------------------------------
 log "Installing Node.js ${NODE_MAJOR}..."
 mkdir -p /etc/apt/keyrings
 curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-  | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg
+  | gpg --batch --yes --dearmor -o /etc/apt/keyrings/nodesource.gpg
 echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
   > /etc/apt/sources.list.d/nodesource.list
 apt-get update -qq
@@ -181,7 +187,7 @@ log "uv installed."
 
 # --- 9. Claude Code CLI ------------------------------------------------------
 log "Installing Claude Code..."
-sudo -u "${UBUNTU_USER}" bash -c 'curl -fsSL https://claude.ai/install.sh | sh'
+sudo -u "${UBUNTU_USER}" bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
 log "Claude Code installed."
 
 # --- 10. mcporter (for ActingWeb MCP) ----------------------------------------
@@ -274,7 +280,7 @@ Wants=network-online.target
 User=${UBUNTU_USER}
 Group=${UBUNTU_USER}
 Type=simple
-ExecStart=/usr/local/bin/ttyd --port 7681 --credential ${TTYD_USER}:${TTYD_PASSWORD} --writable login
+ExecStart=/usr/local/bin/ttyd --port 7681 --credential ${TTYD_USER}:${TTYD_PASSWORD} --writable bash --login
 Restart=on-failure
 RestartSec=5
 Environment=HOME=${HOME_DIR}
@@ -295,7 +301,7 @@ if [[ "${INSTALL_DOCKER}" == "true" ]]; then
   log "Installing Docker..."
   install -m 0755 -d /etc/apt/keyrings
   curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
   chmod a+r /etc/apt/keyrings/docker.gpg
   echo \
     "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \

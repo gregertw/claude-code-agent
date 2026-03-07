@@ -49,6 +49,7 @@ SCHEDULE_INTERVAL=60
 
 # --- AWS ---------------------------------------------------------------------
 # AWS region for the EC2 instance and EventBridge Scheduler
+# Pick the one from AWS regions that is closed to you
 AWS_REGION="eu-north-1"
 
 # --- Installation Options ----------------------------------------------------

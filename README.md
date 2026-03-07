@@ -3,6 +3,16 @@
 A continuously running AI agent that processes tasks, maintains cross-session memory,
 and improves itself over time. Runs on an AWS EC2 instance with optional Dropbox sync.
 
+## GETTING STARTED 
+
+Paste this prompt into claude code:
+
+```txt
+In this repo, we have instructions for creating a claude code based autonomous agent running in
+AWS. Start with README.md and help me through each step by asking me questions on where I need to
+decide or give input, but mostly just execute on the steps given without giving me too much detail.
+```
+
 ## What You Get
 
 - **Autonomous task execution** — the agent wakes up on a schedule, processes queued tasks,
