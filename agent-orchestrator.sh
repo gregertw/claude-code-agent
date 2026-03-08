@@ -60,7 +60,7 @@ if [[ "${FILE_SYNC}" == "dropbox" ]]; then
 else
   BRAIN_DIR="${HOME_DIR}/brain"
 fi
-INBOX_DIR="${BRAIN_DIR}/${OUTPUT_FOLDER}/INBOX"
+INBOX_DIR="${BRAIN_DIR}/INBOX"
 
 echo "Owner: ${OWNER_NAME}"
 echo "Brain dir: ${BRAIN_DIR}"
@@ -150,17 +150,19 @@ You are running as an autonomous agent on ${OWNER_NAME}'s server. This is an una
 3. Execute the DEFAULT TASKS defined in default-tasks.md, in order.
    If an MCP connection is unavailable, log it as skipped and continue.
 
-4. Scan the INBOX folder (at "${OUTPUT_FOLDER}/INBOX/") for .txt and .md files.
+4. Scan the INBOX folder (at "INBOX/") for .txt and .md files.
    Skip files starting with "_".
    For each task file found:
    - Read the file contents (this is the task prompt)
    - Execute the task following the patterns in tasks.md
+   - Write the result to "${OUTPUT_FOLDER}/tasks/"
    - Log the result
-   - Move the file to "${OUTPUT_FOLDER}/INBOX/_processed/" with today's date prefix
+   - Move the file to "INBOX/_processed/" with today's date prefix
 
 5. Check ActingWeb for queued tasks using the work_on_task MCP tool (list_only=true first).
    For each ready task:
    - Execute it following the patterns in tasks.md
+   - Write the result to "${OUTPUT_FOLDER}/tasks/"
    - Mark it as done via work_on_task(mark_done=true, task_id=...)
    - Log the result
 
@@ -170,7 +172,7 @@ You are running as an autonomous agent on ${OWNER_NAME}'s server. This is an una
    - Next recommended actions
 
 7. If any tasks were deferred or need attention, create a summary file at:
-   "${OUTPUT_FOLDER}/INBOX/_agent-attention-needed-$(date +%Y%m%d).md"
+   "INBOX/_agent-attention-needed-$(date +%Y%m%d).md"
 
 IMPORTANT RULES:
 - Never send emails or messages. Only draft.
@@ -208,7 +210,12 @@ if [[ "${FILE_SYNC}" == "dropbox" ]]; then
   echo "Dropbox status: ${FINAL_STATUS}"
 fi
 
-# --- 7. Write heartbeat file (for monitoring) --------------------------------
+# --- 7. Copy run log to brain output/logs/ -----------------------------------
+BRAIN_LOG_DIR="${BRAIN_DIR}/${OUTPUT_FOLDER}/logs"
+mkdir -p "${BRAIN_LOG_DIR}"
+cp "${RUN_LOG}" "${BRAIN_LOG_DIR}/" 2>/dev/null || true
+
+# --- 8. Write heartbeat file (for monitoring) ---------------------------------
 HEARTBEAT_FILE="${BRAIN_DIR}/${OUTPUT_FOLDER}/.agent-heartbeat"
 cat > "${HEARTBEAT_FILE}" << EOF
 last_run=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -216,7 +223,7 @@ exit_code=${CLAUDE_EXIT}
 log=${RUN_LOG}
 EOF
 
-# --- 8. Log cleanup (keep last 100 logs) ------------------------------------
+# --- 9. Log cleanup (keep last 100 logs) ------------------------------------
 LOG_COUNT=$(ls -1 "${LOG_DIR}"/agent-run-*.md 2>/dev/null | wc -l)
 if [[ ${LOG_COUNT} -gt 100 ]]; then
   echo "Cleaning old logs (keeping last 100)..."
@@ -224,7 +231,7 @@ if [[ ${LOG_COUNT} -gt 100 ]]; then
   ls -1t "${LOG_DIR}"/orchestrator-*.log | tail -n +101 | xargs rm -f
 fi
 
-# --- 9. Self-stop (scheduled mode) ------------------------------------------
+# --- 10. Self-stop (scheduled mode) -----------------------------------------
 echo ""
 echo "=== Orchestrator finished at $(date) ==="
 

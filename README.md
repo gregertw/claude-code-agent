@@ -93,7 +93,6 @@ feature to work in it.
 ### Prerequisites
 
 - Claude Desktop app installed
-- Node.js and npm (for MCP servers)
 
 ### Step A1: Choose a directory
 
@@ -103,6 +102,12 @@ its instructions, scratchpad, inbox, and outputs. For example:
 - `~/brain/` — simple default
 - `~/Documents/agent-brain/` — inside Documents
 - `~/Dropbox/brain/` — if you want Dropbox sync
+
+> **Tip**: The brain directory is also compatible with [Obsidian](https://obsidian.md),
+> a free knowledge management app. If you use Obsidian, you can open the brain
+> folder as a vault to browse and edit your instruction files, task outputs, and
+> scratchpad notes with a nice UI. No extra setup required — just open the folder
+> in Obsidian.
 
 ### Step A2: Install template files
 
@@ -115,36 +120,77 @@ BRAIN_DIR="$HOME/brain"
 # Create the directory structure
 mkdir -p "$BRAIN_DIR/ai/instructions"
 mkdir -p "$BRAIN_DIR/ai/scratchpad"
-mkdir -p "$BRAIN_DIR/output/INBOX/_processed"
+mkdir -p "$BRAIN_DIR/INBOX/_processed"
+mkdir -p "$BRAIN_DIR/output/tasks"
+mkdir -p "$BRAIN_DIR/output/logs"
 
 # Copy templates
 cp templates/CLAUDE.md "$BRAIN_DIR/CLAUDE.md"
 cp templates/tasks.md "$BRAIN_DIR/ai/instructions/tasks.md"
 cp templates/default-tasks.md "$BRAIN_DIR/ai/instructions/default-tasks.md"
+cp templates/personal.md "$BRAIN_DIR/ai/instructions/personal.md"
+cp templates/style.md "$BRAIN_DIR/ai/instructions/style.md"
 
 # Replace placeholder in CLAUDE.md
 sed -i '' 's/{OUTPUT_FOLDER}/output/g' "$BRAIN_DIR/CLAUDE.md"
 ```
 
-Optionally create personal context files:
-
-- `$BRAIN_DIR/ai/instructions/personal.md` — who you are, preferences
-- `$BRAIN_DIR/ai/instructions/style.md` — writing style rules
+The `personal.md` and `style.md` files are templates with placeholder sections.
+The agent will help you fill them in during your first session.
 
 ### Step A3: Set up MCP connections
 
 Add the following MCP servers in Claude Desktop's settings (Settings → MCP Servers):
 
-- **ActingWeb** (required): `https://ai.actingweb.io/mcp`
-- **Gmail** (optional): `https://gmail.mcporter.ai/mcp` — requires Google OAuth credentials
-- **Google Calendar** (optional): `https://calendar.mcporter.ai/mcp` — requires Google OAuth credentials
+- **ActingWeb** (required): `https://ai.actingweb.io/mcp` — account is auto-created on first auth
+- **Gmail** (optional) — requires Google OAuth credentials
+- **Google Calendar** (optional) — requires Google OAuth credentials
 
-### Step A4: Start Cowork
+### Step A4: Open your brain folder in Cowork
+
+Steps A1–A3 set up the brain directory, templates, and MCP connections.
+Now switch to working **in** the brain folder:
 
 1. Open Claude Desktop
 2. Start a new **Cowork** session
 3. Choose **"Work in a folder"** and select your brain directory (e.g. `~/brain`)
-4. Claude will read the `CLAUDE.md` file and follow the agent instructions automatically
+4. Claude will read the `CLAUDE.md` file automatically
+
+You're now working inside your agent workspace. Continue to Step A5.
+
+### Step A5: Personalize and set up schedule
+
+Send this prompt in your new Cowork session:
+
+```txt
+Read the instruction files in ai/instructions/ and introduce yourself.
+Then check if ActingWeb memory is connected by searching for any existing memories.
+If this is our first session, walk me through filling in personal.md and style.md:
+- Search ActingWeb memories for any existing personal context or preferences
+- If Gmail is connected, analyze my recent sent emails to infer my writing style
+- Then ask me questions to fill in the remaining gaps in the templates
+Finally, offer to set up a recurring schedule for the default tasks (email triage,
+calendar preview, inbox scan). Suggest a sensible schedule and set it up if I agree.
+```
+
+This verifies your setup works (MCP connection, file access), walks you through
+personalizing the templates, and optionally sets up a recurring schedule so the
+agent runs your default tasks automatically in the background.
+
+### Queuing tasks via ActingWeb
+
+You can create tasks for the agent from anywhere — your phone, another AI session,
+or the web. Open the **Context Builder** at:
+
+```
+https://ai.actingweb.io/{actor_id}/app/builder
+```
+
+(Find your `actor_id` by calling `how_to_use()` in any session with ActingWeb connected.)
+
+The Context Builder wizard lets you describe what you want done and attach relevant
+memories as context. When you mark the task as ready, the agent picks it up on its
+next run via `work_on_task()`.
 
 See [docs/cowork-setup.md](docs/cowork-setup.md) for more details on the Cowork setup.
 
@@ -370,22 +416,27 @@ Edit the file to customize.
 
 ### 2. Inbox Tasks (one-off)
 
-Drop `.txt` or `.md` files in the INBOX folder:
+Drop `.txt` or `.md` files in the `INBOX/` folder at the root of your brain directory:
 
 ```bash
 # Option A: drop files directly into your brain directory
-echo "Research pricing for t4g instances" > ~/brain/output/INBOX/research.txt
+echo "Research pricing for t4g instances" > ~/brain/INBOX/research.txt
 
 # Option B with Dropbox: drop files from any device into the INBOX folder
 # Option B without Dropbox: use SSH/ttyd or queue via ActingWeb
 ```
 
 After execution, files move to `INBOX/_processed/` with a date prefix.
+Results are written to `output/tasks/`.
 
 ### 3. ActingWeb Tasks
 
-Tasks queued from other AI sessions (Cowork, ChatGPT, etc.) via ActingWeb.
-The orchestrator retrieves and executes them automatically, then marks them done.
+Create tasks from anywhere using the **Context Builder** — a guided wizard at
+`https://ai.actingweb.io/{actor_id}/app/builder` where you describe what you
+want done and attach relevant memories as context.
+
+The agent retrieves tasks via `work_on_task()`, executes them with the gathered
+context, writes results to `output/tasks/`, and marks them done.
 This works in both Option A and Option B.
 
 ### Viewing Logs (Option B)
@@ -513,11 +564,13 @@ Keep this directory in your Dropbox or backed up — it's the source of truth fo
 | `CLAUDE.md` | Workspace instructions for Claude Code |
 | `ai/instructions/tasks.md` | Task type definitions and execution rules |
 | `ai/instructions/default-tasks.md` | Recurring tasks (run every cycle) |
-| `ai/instructions/personal.md` | Personal context for the agent (create yours) |
-| `ai/instructions/style.md` | Writing style rules (create yours) |
-| `{output}/INBOX/` | Drop tasks here (.txt or .md) |
-| `{output}/INBOX/_processed/` | Completed inbox tasks |
-| `{output}/.agent-heartbeat` | Last-run timestamp (for monitoring) |
+| `ai/instructions/personal.md` | Personal context for the agent (fill in during setup) |
+| `ai/instructions/style.md` | Writing style rules (fill in during setup) |
+| `INBOX/` | Drop tasks here (.txt or .md) |
+| `INBOX/_processed/` | Completed inbox tasks |
+| `output/tasks/` | Results from scheduled runs and ActingWeb tasks |
+| `output/logs/` | Run logs from each agent cycle |
+| `output/.agent-heartbeat` | Last-run timestamp (for monitoring) |
 
 ### On the Server (Option B, created by setup.sh)
 

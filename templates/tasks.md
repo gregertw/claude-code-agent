@@ -4,12 +4,11 @@ scope: task-execution
 tags:
   - ai/config
   - ai/instruction
-  - ai/agent-server
 ---
 
-# Task Execution Reference — Agent Server
+# Task Execution Reference
 
-This document defines how the agent server executes tasks. It is read by Claude Code at startup before processing any task queue.
+This document defines how the agent executes tasks. It is read at startup before processing any task queue.
 
 For personal context, see [personal](personal.md). For writing style, see [style](style.md). For recurring tasks, see [default-tasks](default-tasks.md).
 
@@ -17,11 +16,10 @@ For personal context, see [personal](personal.md). For writing style, see [style
 
 ## Execution Context
 
-You are running as an autonomous Claude Code agent on the owner's server. You have:
-- Access to `~/Dropbox/` (synced via Dropbox CLI, contains the owner's Obsidian vault)
-- MCP connections configured in `~/.claude.json` (ActingWeb memories, and optionally Gmail, Calendar)
+You are running as an AI agent in the owner's workspace. You have:
+- Access to the brain directory (local filesystem or synced via Dropbox)
+- MCP connections (ActingWeb memories, and optionally Gmail, Calendar)
 - Internet access for web search and API calls
-- No human in the loop — you must make reasonable judgments and log what you did
 
 ### Key Constraints
 - **Never send emails, messages, or calendar invites** without explicit instruction in the task. Default to drafting, not sending.
@@ -38,14 +36,27 @@ You are running as an autonomous Claude Code agent on the owner's server. You ha
 Recurring tasks that run every cycle. These are defined in the companion file and should be executed first. They include things like checking email, reviewing the inbox folder, and memory hygiene.
 
 ### 2. Inbox Tasks (INBOX folder)
-One-off tasks dropped as `.txt` or `.md` files. Each file contains a prompt/instruction. After execution:
-- Move the task file to the `_processed/` subfolder with a timestamp prefix
-- Write the result summary to the log
+One-off tasks dropped as `.txt` or `.md` files in the `INBOX/` folder at the root of the brain directory. Each file contains a prompt/instruction. After execution:
+- Move the task file to `INBOX/_processed/` with a timestamp prefix
+- Write the result to `output/tasks/`
 
 ### 3. ActingWeb Tasks
-Retrieved via the ActingWeb `work_on_task` MCP tool. These are tasks queued from other AI sessions or scheduled via the ActingWeb dashboard. After execution:
-- Mark the task as done via `work_on_task(mark_done=true, task_id=...)`
-- Write the result summary to the log
+Retrieved via the ActingWeb `work_on_task` MCP tool. These are tasks created through the ActingWeb Context Builder — a guided wizard where users describe what they want done and gather relevant personal context (memories, preferences, notes) to enrich the task.
+
+**How to create a task**: Open the Context Builder at `https://ai.actingweb.io/{actor_id}/app/builder` (find your actor_id via the `how_to_use()` MCP tool). The wizard helps you:
+1. Describe what you want accomplished
+2. Explore and attach relevant memories as context
+3. Mark the task as ready for the agent to pick up
+
+**How the agent processes ActingWeb tasks**:
+- Call `work_on_task()` to retrieve the next ready task (includes gathered context automatically)
+- Execute the task using the included context for personalized results
+- Write the result to `output/tasks/`
+- Mark as done via `work_on_task(mark_done=true, task_id=...)`
+
+**Other work_on_task operations**:
+- `work_on_task(list_only=true)` — list all ready and completed tasks
+- `work_on_task(task_id=42)` — retrieve a specific task by ID
 
 ---
 
@@ -112,7 +123,7 @@ Each task file or instruction can be categorized. The agent should identify the 
 **Trigger words**: "summarize", "report", "digest", "overview", "status"
 **Execution**:
 1. Gather data from the specified sources
-2. Write report to the output folder or scratchpad
+2. Write report to `output/` or scratchpad
 3. Keep it concise
 4. Log: filename and scope of the summary
 
@@ -137,7 +148,6 @@ Structure your output as a markdown log. Each task should be logged in this form
 ## Error Handling
 
 - **MCP connection failure**: Log the error, skip tasks requiring that MCP, continue with remaining tasks.
-- **Dropbox not synced**: Wait up to 3 minutes at startup. If still syncing, proceed with available files and log a warning.
 - **API rate limit**: Wait 30 seconds and retry once. If still failing, log as deferred.
 - **Ambiguous task**: If a task instruction is unclear, log it as deferred with "needs clarification" and move on.
 - **Large task**: If a task would take more than 5 minutes, log as deferred with scope estimate.
@@ -147,6 +157,6 @@ Structure your output as a markdown log. Each task should be logged in this form
 ## Post-Run
 
 After all tasks are processed:
-1. Write a final summary section in the log
-2. If any tasks were deferred or failed, create a summary note in the INBOX named `_agent-attention-needed-YYYYMMDD.md` listing items that need attention
+1. Write the run log to `output/logs/` with filename `run-YYYY-MM-DD-HHMM.md`
+2. If any tasks were deferred or failed, create a summary note in `INBOX/` named `_agent-attention-needed-YYYYMMDD.md` listing items that need attention
 3. If in scheduled mode, the orchestrator will handle shutdown
