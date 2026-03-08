@@ -191,11 +191,34 @@ echo ""
 
 cd "${BRAIN_DIR}"
 
+# Build MCP config path and allowed tools list
+MCP_CONFIG_ARGS=""
+ALLOWED_MCP_TOOLS=""
+
+# Check for MCP config file (created by deploy.sh or setup-mcp.sh)
+MCP_CONFIG_FILE="${HOME_DIR}/.agent-mcp-config.json"
+if [[ -f "${MCP_CONFIG_FILE}" ]]; then
+  MCP_CONFIG_ARGS="--mcp-config ${MCP_CONFIG_FILE}"
+  # Extract MCP server names and build allowed tools list
+  MCP_SERVERS=$(python3 -c "
+import json
+with open('${MCP_CONFIG_FILE}') as f:
+    d = json.load(f)
+for name in d.get('mcpServers', {}):
+    print(f'mcp__{name}')
+" 2>/dev/null || true)
+  if [[ -n "${MCP_SERVERS}" ]]; then
+    ALLOWED_MCP_TOOLS="--allowedTools ${MCP_SERVERS}"
+  fi
+fi
+
 # Run Claude in non-interactive mode with the master prompt
 # --max-turns prevents infinite loops in autonomous mode
 claude -p "${MASTER_PROMPT}" \
   --output-format text \
   --max-turns 50 \
+  ${MCP_CONFIG_ARGS} \
+  ${ALLOWED_MCP_TOOLS} \
   2>&1 | tee "${RUN_LOG}"
 
 CLAUDE_EXIT=$?

@@ -30,7 +30,7 @@ FILE_SYNC="dropbox"
 
 # --- Web Terminal ------------------------------------------------------------
 # Install ttyd for browser-based terminal access? (true/false)
-# Provides a web terminal at https://<ip>:7681 with basic auth.
+# Provides a web terminal at https://<ip> with self-signed TLS certificate.
 # Useful as an alternative or supplement to SSH, especially without Dropbox.
 INSTALL_TTYD=false
 
@@ -53,15 +53,6 @@ SCHEDULE_INTERVAL=60
 AWS_REGION="eu-north-1"
 
 # --- Installation Options ----------------------------------------------------
-# Install Docker? (true/false)
-INSTALL_DOCKER=true
-
-# Install VS Code Server for browser-based editing? (true/false)
-INSTALL_CODE_SERVER=false
-
-# Node.js major version (for MCP servers)
-NODE_MAJOR=22
-
 # Linux username on the EC2 instance
 UBUNTU_USER="ubuntu"
 

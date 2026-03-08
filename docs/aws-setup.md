@@ -16,10 +16,42 @@ Create a cloud instance that runs the agent autonomously.
 - An AWS account
 - An Anthropic API key from [console.anthropic.com](https://console.anthropic.com)
 - An ActingWeb account (automatically created on first `/mcp` authentication)
-- AWS CLI installed on your local machine (for the scheduler)
+- AWS CLI installed and configured on your local machine (`aws configure`)
+- Node.js + npm installed locally (for mcporter OAuth)
 - A Dropbox account (only if using Dropbox sync)
 
-## Step 1: Configure
+## Quick Deploy (recommended)
+
+The `deploy.sh` script automates the entire setup in one command: creates AWS
+resources (key pair, security group, EC2 instance, Elastic IP), uploads and runs
+the server setup, configures MCP connections with local OAuth, and deploys the
+EventBridge scheduler.
+
+```bash
+# 1. Configure
+cp agent.conf.example agent.conf
+nano agent.conf    # set OWNER_NAME, FILE_SYNC, SCHEDULE_MODE, etc.
+
+# 2. Deploy (prompts for API key, opens browser for OAuth)
+export ANTHROPIC_API_KEY="sk-ant-..."    # or let the script prompt you
+./deploy.sh
+
+# 3. Test
+ssh agent
+~/scripts/agent-orchestrator.sh --no-stop
+```
+
+To tear everything down: `./teardown.sh`
+
+State is saved to `deploy-state.json` so teardown knows what to remove.
+
+If you prefer to set up each step manually, follow the manual steps below.
+
+---
+
+## Manual Setup
+
+### Step 1: Configure
 
 ```bash
 cp agent.conf.example agent.conf
@@ -41,7 +73,7 @@ If not using Dropbox:
 - `INSTALL_TTYD=true` — enables browser-based terminal access
 - `TTYD_USER` / `TTYD_PASSWORD` — credentials for the web terminal
 
-## Step 2: Launch EC2 Instance
+### Step 2: Launch EC2 Instance
 
 1. Open [AWS Console -> EC2 -> Launch Instance](https://console.aws.amazon.com/ec2/home#LaunchInstances:)
 2. Configure:
@@ -50,18 +82,18 @@ If not using Dropbox:
    - **Architecture**: x86_64
    - **Instance type**: `t3.large` (2 vCPU, 8GB RAM)
    - **Key pair**: Create new or select existing. Download the `.pem` file.
-   - **Network**: Allow SSH from "My IP"
+   - **Network**: Allow SSH from "My IP". If using ttyd, also allow port 443 from "My IP".
    - **Storage**: 30 GB gp3
 3. Click **Launch Instance**
 4. Note the **Instance ID**
 
-## Step 3: Allocate Elastic IP
+### Step 3: Allocate Elastic IP
 
 1. EC2 -> **Elastic IPs** -> **Allocate** -> **Allocate**
 2. Select the new IP -> **Actions** -> **Associate** -> choose `agent-server`
 3. Note the Elastic IP address
 
-## Step 4: Upload and Run Setup
+### Step 4: Upload and Run Setup
 
 ```bash
 # Fix key permissions
@@ -79,7 +111,7 @@ chmod +x setup.sh
 sudo ./setup.sh
 ```
 
-## Step 5: Post-Setup (with Dropbox)
+### Step 5: Post-Setup (with Dropbox)
 
 ```bash
 # a) Set API key
@@ -109,7 +141,7 @@ echo 'Reply: Hello' | claude -p
 ~/scripts/agent-orchestrator.sh --no-stop
 ```
 
-## Step 5: Post-Setup (without Dropbox)
+### Step 5: Post-Setup (without Dropbox)
 
 ```bash
 # a) Set API key
@@ -129,7 +161,7 @@ echo 'Reply: Hello' | claude -p
 
 Template files are installed automatically into `~/brain/` when not using Dropbox.
 
-## Step 6: Set Up Local SSH Config
+### Step 6: Set Up Local SSH Config
 
 Add to `~/.ssh/config` on your local machine:
 
@@ -151,7 +183,7 @@ Now just: `ssh agent`
 If you enabled `INSTALL_TTYD=true`, you get a browser-based terminal at:
 
 ```text
-http://<elastic-ip>:7681
+https://<elastic-ip>
 ```
 
 Log in with the `TTYD_USER` and `TTYD_PASSWORD` from your `agent.conf`.
@@ -162,9 +194,10 @@ brain directory and logs without needing an SSH client.
 
 **Security notes:**
 
-- ttyd uses HTTP basic auth — adequate for personal use behind UFW
-- For production use, consider putting it behind an nginx reverse proxy with TLS
-- The firewall only allows port 7681 if ttyd is enabled
+- ttyd uses HTTPS with a self-signed certificate on port 443
+- Your browser will show a certificate warning — this is expected for self-signed certs
+- The AWS security group restricts port 443 to your deploy IP
+- The server firewall (UFW) only allows port 443 if ttyd is enabled
 
 ---
 

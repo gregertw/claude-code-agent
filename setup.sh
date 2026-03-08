@@ -36,9 +36,6 @@ FILE_SYNC="${FILE_SYNC:-dropbox}"
 INSTALL_TTYD="${INSTALL_TTYD:-false}"
 TTYD_USER="${TTYD_USER:-agent}"
 TTYD_PASSWORD="${TTYD_PASSWORD:-changeme}"
-INSTALL_DOCKER="${INSTALL_DOCKER:-true}"
-INSTALL_CODE_SERVER="${INSTALL_CODE_SERVER:-false}"
-NODE_MAJOR="${NODE_MAJOR:-22}"
 UBUNTU_USER="${UBUNTU_USER:-ubuntu}"
 BRAIN_FOLDER="${BRAIN_FOLDER:-brain}"
 OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
@@ -120,7 +117,7 @@ ufw default deny incoming
 ufw default allow outgoing
 ufw allow OpenSSH
 if [[ "${INSTALL_TTYD}" == "true" ]]; then
-  ufw allow 7681/tcp comment 'ttyd web terminal'
+  ufw allow 443/tcp comment 'ttyd web terminal (HTTPS)'
 fi
 ufw --force enable
 log "Firewall enabled — SSH allowed."
@@ -169,16 +166,18 @@ sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_co
 systemctl restart ssh
 log "SSH hardened — password auth disabled, root login disabled."
 
-# --- 7. Node.js (for MCP servers) --------------------------------------------
-log "Installing Node.js ${NODE_MAJOR}..."
+# --- 7. (Node.js removed — install manually if needed for MCP servers) -------
+
+# --- 7b. Glow (terminal markdown renderer) -----------------------------------
+log "Installing glow (terminal markdown renderer)..."
 mkdir -p /etc/apt/keyrings
-curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
-  | gpg --batch --yes --dearmor -o /etc/apt/keyrings/nodesource.gpg
-echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_${NODE_MAJOR}.x nodistro main" \
-  > /etc/apt/sources.list.d/nodesource.list
+curl -fsSL https://repo.charm.sh/apt/gpg.key \
+  | gpg --batch --yes --dearmor -o /etc/apt/keyrings/charm.gpg
+echo "deb [signed-by=/etc/apt/keyrings/charm.gpg] https://repo.charm.sh/apt/ * *" \
+  > /etc/apt/sources.list.d/charm.list
 apt-get update -qq
-apt-get install -y -qq nodejs
-log "Node.js $(node --version) installed."
+apt-get install -y -qq glow
+log "glow $(glow --version 2>/dev/null || echo 'installed')."
 
 # --- 8. Python tooling (uv) --------------------------------------------------
 log "Installing uv (fast Python package manager)..."
@@ -190,10 +189,6 @@ log "Installing Claude Code..."
 sudo -u "${UBUNTU_USER}" bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
 log "Claude Code installed."
 
-# --- 10. mcporter (for ActingWeb MCP) ----------------------------------------
-log "Installing mcporter (MCP proxy for headless environments)..."
-npm install -g mcporter
-log "mcporter installed."
 
 # --- 11. Dropbox Headless CLI (optional) -------------------------------------
 if [[ "${FILE_SYNC}" == "dropbox" ]]; then
@@ -272,18 +267,30 @@ if [[ "${INSTALL_TTYD}" == "true" ]]; then
       warn "TTYD_PASSWORD is still 'changeme'. Change it in agent.conf!"
     fi
 
-    # Create systemd service for ttyd
+    # Generate self-signed TLS certificate for HTTPS
+    TTYD_CERT_DIR="${HOME_DIR}/.ttyd-certs"
+    mkdir -p "${TTYD_CERT_DIR}"
+    openssl req -x509 -newkey rsa:2048 -nodes \
+      -keyout "${TTYD_CERT_DIR}/key.pem" \
+      -out "${TTYD_CERT_DIR}/cert.pem" \
+      -days 3650 \
+      -subj "/CN=agent-server" 2>/dev/null
+    chown -R "${UBUNTU_USER}:${UBUNTU_USER}" "${TTYD_CERT_DIR}"
+    chmod 600 "${TTYD_CERT_DIR}/key.pem"
+    log "Self-signed TLS certificate generated (valid 10 years)."
+
+    # Create systemd service for ttyd with HTTPS on port 443
     cat > /etc/systemd/system/ttyd.service << EOF
 [Unit]
-Description=ttyd Web Terminal
+Description=ttyd Web Terminal (HTTPS)
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-User=${UBUNTU_USER}
-Group=${UBUNTU_USER}
+User=root
+Group=root
 Type=simple
-ExecStart=/usr/local/bin/ttyd --port 7681 --credential ${TTYD_USER}:${TTYD_PASSWORD} --writable bash --login
+ExecStart=/usr/local/bin/ttyd --port 443 --ssl --ssl-cert ${TTYD_CERT_DIR}/cert.pem --ssl-key ${TTYD_CERT_DIR}/key.pem --credential ${TTYD_USER}:${TTYD_PASSWORD} --uid $(id -u ${UBUNTU_USER}) --gid $(id -g ${UBUNTU_USER}) --writable bash --login
 Restart=on-failure
 RestartSec=5
 Environment=HOME=${HOME_DIR}
@@ -294,38 +301,12 @@ EOF
 
     systemctl daemon-reload
     systemctl enable --now ttyd.service
-    log "ttyd installed and running on port 7681."
-    log "Access at: http://<your-ip>:7681 (user: ${TTYD_USER})"
+    log "ttyd installed and running on port 443 (HTTPS with self-signed cert)."
+    log "Access at: https://<your-ip> (user: ${TTYD_USER})"
   fi
 fi
 
-# --- 13. Docker (optional) ---------------------------------------------------
-if [[ "${INSTALL_DOCKER}" == "true" ]]; then
-  log "Installing Docker..."
-  install -m 0755 -d /etc/apt/keyrings
-  curl -fsSL https://download.docker.com/linux/ubuntu/gpg \
-    | gpg --batch --yes --dearmor -o /etc/apt/keyrings/docker.gpg
-  chmod a+r /etc/apt/keyrings/docker.gpg
-  echo \
-    "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
-    https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable" \
-    > /etc/apt/sources.list.d/docker.list
-  apt-get update -qq
-  apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
-  usermod -aG docker "${UBUNTU_USER}"
-  log "Docker installed. User ${UBUNTU_USER} added to docker group."
-fi
-
-# --- 14. VS Code Server (optional) -------------------------------------------
-if [[ "${INSTALL_CODE_SERVER}" == "true" ]]; then
-  log "Installing code-server (VS Code in browser)..."
-  curl -fsSL https://code-server.dev/install.sh | sh
-  systemctl enable --now code-server@"${UBUNTU_USER}"
-  warn "code-server is running on port 8080. Add UFW rule if you want remote access."
-  log "code-server installed."
-fi
-
-# --- 15. Environment Setup ---------------------------------------------------
+# --- 13. Environment Setup ---------------------------------------------------
 log "Setting up environment..."
 
 # Create .env file for API keys
@@ -372,16 +353,11 @@ fi
 
 # Aliases
 alias ll='ls -lah'
-alias gs='git status'
-alias dc='docker compose'
-alias claude-run='claude -p'
-alias agent-mode='cat ~/.agent-schedule'
-alias agent-logs='ls -lt ~/logs/ | head -20'
 
 # Path additions
 export PATH="$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
 
-# tmux: auto-attach or create session on SSH login
+# tmux: auto-attach or create session on SSH login (skip for ttyd)
 if [[ -z "${TMUX:-}" ]] && [[ -n "${SSH_CONNECTION:-}" ]]; then
   tmux attach-session -t main 2>/dev/null || tmux new-session -s main
 fi
@@ -399,6 +375,22 @@ sudo -u "${UBUNTU_USER}" mkdir -p "${HOME_DIR}/scripts"
 sudo -u "${UBUNTU_USER}" mkdir -p "${HOME_DIR}/logs"
 
 log "Environment configured."
+
+# Add MOTD to .profile (runs on login for both SSH and ttyd)
+PROFILE_SENTINEL="# --- Agent MOTD ---"
+if ! grep -qF "${PROFILE_SENTINEL}" "${HOME_DIR}/.profile" 2>/dev/null; then
+  cat >> "${HOME_DIR}/.profile" << 'PROFILE_MOTD'
+
+# --- Agent MOTD ---
+# Show agent status on login (works for ttyd and SSH)
+if [[ -z "${AGENT_MOTD_SHOWN:-}" ]]; then
+  export AGENT_MOTD_SHOWN=1
+  run-parts /etc/update-motd.d/ 2>/dev/null
+fi
+PROFILE_MOTD
+  chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/.profile"
+  log "MOTD added to .profile."
+fi
 
 # --- 16. Claude Code Settings ------------------------------------------------
 log "Configuring Claude Code permissions for autonomous mode..."
@@ -566,6 +558,113 @@ EOF
 
 chown -R "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/agents"
 
+# --- 19b. Agent CLI Helper ---------------------------------------------------
+log "Installing agent CLI helper..."
+if [[ -f "${SCRIPT_DIR}/agent-cli.sh" ]]; then
+  cp "${SCRIPT_DIR}/agent-cli.sh" "${HOME_DIR}/scripts/agent-cli.sh"
+  chmod +x "${HOME_DIR}/scripts/agent-cli.sh"
+  chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/agent-cli.sh"
+  ln -sf "${HOME_DIR}/scripts/agent-cli.sh" /usr/local/bin/agent
+  log "Agent CLI installed. Use: agent status, agent run, agent logs, etc."
+else
+  warn "agent-cli.sh not found in ${SCRIPT_DIR}. Upload it manually."
+fi
+
+# --- 19c. Login Banner (MOTD) -----------------------------------------------
+log "Setting up login banner..."
+
+# Disable default Ubuntu MOTD noise
+chmod -x /etc/update-motd.d/* 2>/dev/null || true
+
+# Create custom MOTD script
+cat > /etc/update-motd.d/99-agent-status << 'MOTD_SCRIPT'
+#!/usr/bin/env bash
+# Agent server login banner
+
+GREEN='\033[0;32m'
+CYAN='\033[0;36m'
+YELLOW='\033[1;33m'
+RED='\033[0;31m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m'
+
+HOME_DIR="/home/ubuntu"
+source "${HOME_DIR}/.agent-server.conf" 2>/dev/null || true
+source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
+
+FILE_SYNC="${FILE_SYNC:-none}"
+BRAIN_FOLDER="${BRAIN_FOLDER:-brain}"
+OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
+OWNER_NAME="${OWNER_NAME:-Agent}"
+
+if [[ "${FILE_SYNC}" == "dropbox" ]]; then
+  BRAIN_DIR="${HOME_DIR}/Dropbox/${BRAIN_FOLDER}"
+else
+  BRAIN_DIR="${HOME_DIR}/brain"
+fi
+OUTPUT_DIR="${BRAIN_DIR}/${OUTPUT_FOLDER}"
+
+echo ""
+echo -e "${BOLD}  ┌──────────────────────────────────┐${NC}"
+echo -e "${BOLD}  │      Agent Server — ${OWNER_NAME}${NC}"
+echo -e "${BOLD}  └──────────────────────────────────┘${NC}"
+echo ""
+
+# Mode
+MODE="${SCHEDULE_MODE:-unknown}"
+if [[ "$MODE" == "scheduled" ]]; then
+  echo -e "  Mode:     ${CYAN}scheduled${NC} (every ${SCHEDULE_INTERVAL:-60} min)"
+else
+  echo -e "  Mode:     ${CYAN}${MODE}${NC}"
+fi
+
+# Last run
+HB="${OUTPUT_DIR}/.agent-heartbeat"
+if [[ -f "$HB" ]]; then
+  LAST_RUN=$(grep '^last_run=' "$HB" | cut -d= -f2)
+  EXIT_CODE=$(grep '^exit_code=' "$HB" | cut -d= -f2)
+  AGO=""
+  if [[ -n "$LAST_RUN" ]]; then
+    TS=$(date -d "$LAST_RUN" +%s 2>/dev/null || echo "")
+    if [[ -n "$TS" ]]; then
+      NOW=$(date +%s)
+      DIFF=$(( NOW - TS ))
+      if (( DIFF < 60 )); then AGO="${DIFF}s ago"
+      elif (( DIFF < 3600 )); then AGO="$(( DIFF / 60 ))m ago"
+      elif (( DIFF < 86400 )); then AGO="$(( DIFF / 3600 ))h ago"
+      else AGO="$(( DIFF / 86400 ))d ago"
+      fi
+    fi
+  fi
+  if [[ "$EXIT_CODE" == "0" ]]; then
+    echo -e "  Last run: ${GREEN}${AGO}${NC} (exit 0)"
+  else
+    echo -e "  Last run: ${RED}${AGO}${NC} (exit ${EXIT_CODE})"
+  fi
+else
+  echo -e "  Last run: ${DIM}never${NC}"
+fi
+
+# Inbox
+INBOX_DIR="${BRAIN_DIR}/INBOX"
+if [[ -d "$INBOX_DIR" ]]; then
+  COUNT=$(find "$INBOX_DIR" -maxdepth 1 \( -name '*.txt' -o -name '*.md' \) ! -name '_*' 2>/dev/null | wc -l | tr -d ' ')
+  if [[ "$COUNT" -gt 0 ]]; then
+    echo -e "  Inbox:    ${YELLOW}${COUNT} pending task(s)${NC}"
+  else
+    echo -e "  Inbox:    ${DIM}empty${NC}"
+  fi
+fi
+
+echo ""
+echo -e "  ${DIM}Type 'agent' for commands (status, run, logs, research, tasks)${NC}"
+echo ""
+MOTD_SCRIPT
+
+chmod +x /etc/update-motd.d/99-agent-status
+log "Login banner installed."
+
 # --- 20. Install template files ----------------------------------------------
 log "Installing template files..."
 
@@ -679,16 +778,13 @@ cat > "${HOME_DIR}/tools-manifest.txt" << MANIFEST
 # Brain dir: ${BRAIN_DIR}
 #
 # Core Tools:
-node: $(node --version 2>/dev/null || echo "not installed")
-npm: $(npm --version 2>/dev/null || echo "not installed")
 python3: $(python3 --version 2>/dev/null || echo "not installed")
 git: $(git --version 2>/dev/null || echo "not installed")
 aws-cli: $(aws --version 2>/dev/null || echo "not installed")
-mcporter: $(mcporter --version 2>/dev/null || echo "installed")
 claude: installed (run 'claude --version' to check)
+glow: $(glow --version 2>/dev/null || echo "not installed")
 dropbox: $(if [[ "${FILE_SYNC}" == "dropbox" ]]; then echo "installed (headless daemon)"; else echo "not installed (FILE_SYNC=none)"; fi)
-ttyd: $(if [[ "${INSTALL_TTYD}" == "true" ]]; then ttyd --version 2>/dev/null || echo "installed"; else echo "not installed"; fi)
-docker: $(docker --version 2>/dev/null || echo "not installed")
+ttyd: $(if [[ "${INSTALL_TTYD}" == "true" ]]; then echo "installed (HTTPS, port 443)"; else echo "not installed"; fi)
 tmux: $(tmux -V 2>/dev/null || echo "not installed")
 uv: installed (run 'uv --version' to check)
 ripgrep: $(rg --version 2>/dev/null | head -1 || echo "not installed")
@@ -702,7 +798,7 @@ ssh: key-only, root disabled
 
 # Services:
 $(if [[ "${FILE_SYNC}" == "dropbox" ]]; then echo "dropbox.service: enabled (systemd)"; fi)
-$(if [[ "${INSTALL_TTYD}" == "true" ]]; then echo "ttyd.service: enabled (port 7681, basic auth)"; fi)
+$(if [[ "${INSTALL_TTYD}" == "true" ]]; then echo "ttyd.service: enabled (HTTPS, port 443)"; fi)
 agent-boot-runner.service: $(systemctl is-enabled agent-boot-runner.service 2>/dev/null || echo "unknown")
 MANIFEST
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/tools-manifest.txt"

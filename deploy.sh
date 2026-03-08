@@ -10,9 +10,10 @@
 #   - agent.conf in the same directory (copy from agent.conf.example)
 #   - An Anthropic API key
 #   - ActingWeb (for cross-session memory — account auto-created on first /mcp auth)
-#   - Node.js + npm (for local mcporter OAuth)
+#   - Node.js + npm locally (for mcporter OAuth flow)
 #
 # Usage:
+#   export ANTHROPIC_API_KEY="sk-ant-..."   # set before running to skip prompt
 #   ./deploy.sh                    # interactive — prompts for missing values
 #   ./deploy.sh --skip-mcp         # skip MCP/OAuth setup (do it later)
 #   ./deploy.sh --skip-scheduler   # skip EventBridge scheduler setup
@@ -95,7 +96,8 @@ echo ""
 # --- Prompt for API key ------------------------------------------------------
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
   echo -n "Anthropic API key (from console.anthropic.com): "
-  read -r ANTHROPIC_API_KEY
+  read -r -s ANTHROPIC_API_KEY
+  echo ""
   if [[ -z "${ANTHROPIC_API_KEY}" ]]; then
     err "API key is required."
     exit 1
@@ -148,7 +150,7 @@ if [[ "${SG_ID}" != "None" && -n "${SG_ID}" ]]; then
 else
   SG_ID=$(aws ec2 create-security-group \
     --group-name "${SG_NAME}" \
-    --description "Agent server — SSH and ttyd" \
+    --description "Agent server - SSH and ttyd" \
     --vpc-id "${VPC_ID}" \
     --region "${AWS_REGION}" \
     --query 'GroupId' --output text)
@@ -158,7 +160,7 @@ fi
 # Build ingress rules
 RULES='[{"IpProtocol":"tcp","FromPort":22,"ToPort":22,"IpRanges":[{"CidrIp":"'"${MY_IP}/32"'","Description":"SSH from deploy IP"}]}'
 if [[ "${INSTALL_TTYD}" == "true" ]]; then
-  RULES="${RULES}"',{"IpProtocol":"tcp","FromPort":7681,"ToPort":7681,"IpRanges":[{"CidrIp":"'"${MY_IP}/32"'","Description":"ttyd from deploy IP"}]}'
+  RULES="${RULES}"',{"IpProtocol":"tcp","FromPort":443,"ToPort":443,"IpRanges":[{"CidrIp":"'"${MY_IP}/32"'","Description":"ttyd HTTPS from deploy IP"}]}'
 fi
 RULES="${RULES}]"
 
@@ -353,9 +355,15 @@ MCPEOF
       --persist "${MCPORTER_CONFIG}" 2>/dev/null || true
 
     echo ""
-    log "Opening ActingWeb OAuth in your browser..."
-    log "Complete the sign-in to authorize the agent."
+    echo "============================================================"
+    echo "  ACTION REQUIRED: Browser sign-in"
     echo ""
+    echo "  A browser window will open for ActingWeb OAuth sign-in."
+    echo "  Please switch to your browser and complete the sign-in"
+    echo "  when it appears."
+    echo "============================================================"
+    echo ""
+    read -r -p "Press Enter to open the browser..."
 
     # Run mcporter auth locally (browser opens automatically)
     if mcporter auth actingweb --config "${MCPORTER_CONFIG}" --oauth-timeout 120000 2>/dev/null; then
@@ -405,6 +413,10 @@ http.server.HTTPServer(('127.0.0.1', ${REDIRECT_PORT}), H).serve_forever()
           sleep 1
 
           # Open browser
+          echo "============================================================"
+          echo "  ACTION REQUIRED: Complete sign-in in your browser."
+          echo "============================================================"
+          echo ""
           open "${AUTH_URL}" 2>/dev/null || xdg-open "${AUTH_URL}" 2>/dev/null || {
             echo "Open this URL in your browser:"
             echo "  ${AUTH_URL}"
@@ -460,30 +472,33 @@ json.dump(creds, open('${HOME}/.mcporter/credentials.json', 'w'), indent=2)
       fi
     fi
 
-    # Copy credentials to server if we have them
+    # Copy tokens to server and configure MCP as direct HTTP connection
     if [[ -f "${HOME}/.mcporter/credentials.json" ]] && grep -q "tokens\|access_token" "${HOME}/.mcporter/credentials.json" 2>/dev/null; then
-      ssh "${SSH_HOST}" "mkdir -p ~/.mcporter"
-      scp -q "${HOME}/.mcporter/credentials.json" "${SSH_HOST}:~/.mcporter/credentials.json"
+      # Extract access token from mcporter credentials
+      AW_ACCESS_TOKEN=$(python3 -c "
+import json
+d = json.load(open('${HOME}/.mcporter/credentials.json'))
+e = list(d['entries'].values())[0]
+print(e['tokens']['access_token'])
+")
 
-      # Also copy the mcporter config so server knows about actingweb
-      ssh "${SSH_HOST}" "mkdir -p ~/config"
-      ssh "${SSH_HOST}" "cat > ~/config/mcporter.json" << 'REMOTEMCP'
+      # Write MCP config file for the orchestrator (direct HTTP, no mcporter needed)
+      ssh "${SSH_HOST}" "cat > ~/.agent-mcp-config.json" << MCPCONF
 {
   "mcpServers": {
     "actingweb": {
-      "baseUrl": "https://ai.actingweb.io/mcp",
-      "auth": "oauth"
+      "type": "http",
+      "url": "https://ai.actingweb.io/mcp",
+      "headers": {
+        "Authorization": "Bearer ${AW_ACCESS_TOKEN}"
+      }
     }
-  },
-  "imports": []
+  }
 }
-REMOTEMCP
+MCPCONF
+      ssh "${SSH_HOST}" "chmod 600 ~/.agent-mcp-config.json"
 
-      # Add to Claude Code
-      ssh "${SSH_HOST}" "export PATH=\"\$HOME/.local/bin:\$PATH\" && claude mcp add actingweb -- mcporter run actingweb" 2>/dev/null || \
-        warn "claude mcp add failed — may need manual config"
-
-      log "ActingWeb MCP configured on server."
+      log "ActingWeb MCP configured on server (direct HTTP)."
     fi
 
     # Clean up local temp config
@@ -522,7 +537,7 @@ echo "Instance:    ${INSTANCE_ID}"
 echo "Elastic IP:  ${ELASTIC_IP}"
 echo "SSH:         ssh ${SSH_HOST}"
 if [[ "${INSTALL_TTYD}" == "true" ]]; then
-  echo "Web terminal: http://${ELASTIC_IP}:7681"
+  echo "Web terminal: https://${ELASTIC_IP} (self-signed cert)"
 fi
 echo "Mode:        ${SCHEDULE_MODE}"
 echo ""
