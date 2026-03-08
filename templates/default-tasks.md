@@ -38,7 +38,13 @@ Check the calendar for today and tomorrow:
 - Flag any conflicts or back-to-back meetings without breaks
 - Note any events that need preparation
 
-Include the preview in the log. If there are preparation-worthy meetings in the next 6 hours, create a note in the `INBOX/` folder named `prep-<meeting-slug>.md`.
+For meetings in the next 6 hours that involve external participants:
+- Do a quick web search on the participants and their companies
+- Write a brief research note to `output/research/prep-<meeting-slug>.md` covering:
+  who they are, their role, their company, and any recent news or context
+- Search ActingWeb memories for any prior interactions or notes about these contacts
+
+Include the calendar preview in the log.
 
 Skip this task if Calendar MCP is not connected (log a warning).
 

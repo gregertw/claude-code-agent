@@ -68,7 +68,7 @@ Each task file or instruction can be categorized. The agent should identify the 
 **Trigger words**: "research", "find out", "look up", "what is", "compare"
 **Execution**:
 1. Use web search and/or MCP tools to gather information
-2. Write findings to a markdown file in the scratchpad area
+2. Write findings to a markdown file in `output/research/`
 3. If findings are durable facts, save as ActingWeb memories
 4. Log: summary of what was found
 

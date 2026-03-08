@@ -14,7 +14,7 @@ for creating a claude code based autonomous agent. Start with README.md and help
 through each step by asking me questions on where I need to decide or give input,
 but mostly just execute on the steps given without giving me too much detail.
 For steps where there are manual things the user has to do, offer to support with
-a step-wise guide.
+a step-wise guide. Follow the steps diligently.
 ```
 
 ## Choose Your Setup
@@ -123,6 +123,7 @@ mkdir -p "$BRAIN_DIR/ai/scratchpad"
 mkdir -p "$BRAIN_DIR/INBOX/_processed"
 mkdir -p "$BRAIN_DIR/output/tasks"
 mkdir -p "$BRAIN_DIR/output/logs"
+mkdir -p "$BRAIN_DIR/output/research"
 
 # Copy templates
 cp templates/CLAUDE.md "$BRAIN_DIR/CLAUDE.md"
@@ -570,6 +571,7 @@ Keep this directory in your Dropbox or backed up — it's the source of truth fo
 | `INBOX/_processed/` | Completed inbox tasks |
 | `output/tasks/` | Results from scheduled runs and ActingWeb tasks |
 | `output/logs/` | Run logs from each agent cycle |
+| `output/research/` | Research output — meeting prep, background research |
 | `output/.agent-heartbeat` | Last-run timestamp (for monitoring) |
 
 ### On the Server (Option B, created by setup.sh)

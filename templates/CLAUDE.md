@@ -14,6 +14,7 @@ This workspace is managed by an AI agent. It can also be used as an
 | `{OUTPUT_FOLDER}/` | Final deliverables, documents, and content. Treat as persistent — do not delete or overwrite without instruction. |
 | `{OUTPUT_FOLDER}/tasks/` | Results from scheduled task runs and ActingWeb tasks. |
 | `{OUTPUT_FOLDER}/logs/` | Run logs from each agent cycle. |
+| `{OUTPUT_FOLDER}/research/` | Research output — meeting prep, background checks, topic research. |
 
 ## How to Work
 

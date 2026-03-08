@@ -243,6 +243,7 @@ else
   sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/INBOX/_processed"
   sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/tasks"
   sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/logs"
+  sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/research"
 fi
 
 # --- 12. ttyd Web Terminal (optional) ----------------------------------------
@@ -642,6 +643,7 @@ mkdir -p "\${BRAIN}/ai/instructions"
 mkdir -p "\${BRAIN}/INBOX/_processed"
 mkdir -p "\${BRAIN}/\${OUTPUT_FOLDER}/tasks"
 mkdir -p "\${BRAIN}/\${OUTPUT_FOLDER}/logs"
+mkdir -p "\${BRAIN}/\${OUTPUT_FOLDER}/research"
 
 for f in "\${TEMPLATES}"/*.md; do
   [[ ! -f "\$f" ]] && continue
