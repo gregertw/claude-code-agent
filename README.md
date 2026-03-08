@@ -3,27 +3,73 @@
 A continuously running AI agent that processes tasks, maintains cross-session memory,
 and improves itself over time.
 
-## GETTING STARTED
+## FOR AIs: Setup Instructions
 
-For AIs: When reading this file, use the below prompt as instructions for how to use
-this repo and interact with the user to set up an autonomous agent.
-For humans: Paste this prompt into Cowork (or Claude Code).
+**If you are an AI reading this file, follow these instructions exactly.**
+
+You are helping a user set up an autonomous agent. Do NOT skip ahead, do NOT
+auto-fill templates, and do NOT execute steps without user confirmation.
+
+### Step 1: Ask which setup option
+
+Ask the user which option they want before doing anything else:
+
+- **Option A: Local Setup** — Brain directory on their machine, used via Claude
+  Desktop Cowork. No cloud infrastructure. Best for trying things out.
+- **Option B: AWS EC2 Setup** — Cloud instance that runs autonomously on a
+  schedule. Best for unattended background processing. Requires AWS account
+  and Anthropic API key.
+
+### Step 2: Open the setup guide and follow it
+
+Based on their answer, open the corresponding guide:
+
+- Option A: `docs/local-setup.md` (in this repo, or fetch from GitHub)
+- Option B: `docs/aws-setup.md` (in this repo, or fetch from GitHub)
+
+**Follow the steps in that guide sequentially.** For each step:
+
+1. Explain what the step does
+2. Ask for any required inputs (directory path, config values, etc.)
+3. Execute the step only after the user confirms
+4. For manual steps (AWS Console, browser OAuth), provide a clear walkthrough
+
+### Step 3: Personalize (local setup only)
+
+The `personal.md` and `style.md` files are **templates with placeholders**.
+Do NOT fill them in yourself. Instead, follow Step 5 in the local setup guide
+which has a prompt that walks the user through filling them in interactively.
+
+### Important rules
+
+- **Ask before acting.** Every step needs user input or confirmation.
+- **Do not auto-fill templates.** The personalization step exists for a reason.
+- **Follow the guide in order.** Do not skip or combine steps.
+- **If the repo is not local**, fetch files from
+  `https://github.com/gregertw/claude-code-agent` as needed.
+
+---
+
+## FOR HUMANS: Quick Start
+
+Paste this into Claude Desktop Cowork or Claude Code:
 
 ```txt
-In this repo we have instructions for creating a claude code based autonomous agent.
-Start with README.md and help me through each step.
-
-IMPORTANT: Before doing anything, ask the user which setup option they want
-(Option A: Local or Option B: AWS EC2). Then, based on their answer, open the
-corresponding setup guide (docs/local-setup.md or docs/aws-setup.md) and follow
-those steps. Ask for any required inputs (e.g. directory path for local, or AWS
-details for EC2) before executing any steps. For steps where there are manual things
-the user has to do, offer to support with a step-wise guide.
+Follow the instructions at https://github.com/gregertw/claude-code-agent to
+set up an autonomous AI agent. Start with the README.md.
 ```
+
+Or if you have the repo cloned locally:
+
+```txt
+Read README.md in this repo and help me set up the autonomous agent.
+```
+
+---
 
 ## Choose Your Setup
 
-**You must pick one of these before proceeding. Each has its own setup guide.**
+**Pick one of these. Each has its own step-by-step guide.**
 
 ### Option A: Local Setup (Claude Desktop / Cowork)
 
@@ -64,7 +110,7 @@ Create a cloud instance that runs the agent autonomously on a schedule.
 ## Common Setup: ActingWeb and Google OAuth
 
 Both options use ActingWeb for cross-session memory, and optionally Google OAuth
-for Gmail and Calendar access. Set these up regardless of which option you choose.
+for Gmail and Calendar access.
 
 ### ActingWeb (required)
 
@@ -153,7 +199,10 @@ This works in both Option A and Option B.
 | `docs/aws-setup.md` | Option B setup guide |
 | `docs/customization.md` | Customization guide (adding tasks, MCP servers, etc.) |
 | `agent.conf.example` | Configuration template — copy to `agent.conf` (Option B) |
+| `agent-cli.sh` | Agent CLI helper — status, logs, run commands (Option B) |
 | `setup.sh` | Bootstrap script — run on fresh Ubuntu instance (Option B) |
 | `setup-mcp.sh` | Configure MCP connections on server (Option B) |
 | `agent-orchestrator.sh` | Main startup script — full task cycle (Option B) |
+| `deploy.sh` | One-command deploy — creates all AWS resources (Option B) |
+| `teardown.sh` | One-command teardown — destroys all AWS resources (Option B) |
 | `deploy-scheduler.sh` | Create/remove EventBridge scheduler (Option B) |
