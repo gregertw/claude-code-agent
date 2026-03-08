@@ -1,33 +1,33 @@
-# Running the Self-Improving Agent in Claude Cowork
+# Running the Self-Improving Agent with Claude Cowork
 
-You don't need AWS to run this agent system. Claude Cowork (claude.ai projects) can serve as the execution environment with some adaptations.
+The simplest way to run this agent is with Claude Desktop's Cowork feature,
+using "Work in a folder" pointed at your brain directory.
 
-## What Works the Same
+## What Works
 
-- **ActingWeb memories** — fully supported via MCP in Cowork
-- **Instruction files** — upload `ai/instructions/tasks.md`, `default-tasks.md`, `personal.md`, and `style.md` to your project
-- **INBOX tasks** — drop files into the project or use ActingWeb `work_on_task`
-- **Skills** — install the `managing-actingweb-memory` skill for memory management
+- **ActingWeb memories** — fully supported via MCP
+- **Instruction files** — Claude reads `CLAUDE.md` and instruction files directly from the brain folder
+- **INBOX tasks** — drop `.txt` or `.md` files into the `output/INBOX/` folder
+- **File persistence** — everything lives on your local filesystem
 
-## What's Different
+## What's Different from AWS
 
 | Feature | AWS Agent Server | Claude Cowork |
 |---|---|---|
 | Runs unattended | Yes (cron/EventBridge) | No — requires you to start a session |
-| Dropbox sync | Automatic | Manual upload or use Dropbox MCP |
+| Dropbox sync | Automatic | Use Dropbox as the brain directory |
 | Gmail/Calendar | MCP servers (headless) | MCP servers (browser-based OAuth) |
-| File persistence | Dropbox syncs everything | Project files persist, but no filesystem |
+| File persistence | Dropbox syncs everything | Local filesystem |
 | Cost | ~$16-67/month AWS | Included in Claude Pro/Team plan |
 
 ## Setup Steps
 
-1. **Create a Cowork project** at claude.ai
-2. **Upload instruction files** from the `templates/` directory
-3. **Add MCP connections**:
-   - ActingWeb: Add `https://ai.actingweb.io/mcp` as an MCP server (OAuth)
-   - Gmail/Calendar: Add via Cowork's MCP settings
-4. **Install the ActingWeb skill**: Download from https://ai.actingweb.io and install in Cowork
-5. **Start a session** and paste the orchestrator prompt (from `agent-orchestrator.sh`, the `MASTER_PROMPT` section)
+1. **Set up the brain directory** — follow Steps A1–A2 in the main [README](../README.md#step-a1-choose-a-directory)
+2. **Add MCP servers** in Claude Desktop settings (Settings → MCP Servers):
+   - ActingWeb: `https://ai.actingweb.io/mcp` (account auto-created on first auth)
+   - Gmail/Calendar: optional, requires Google OAuth credentials
+3. **Start Cowork** — open Claude Desktop, start a Cowork session, choose **"Work in a folder"**, and select your brain directory
+4. Claude reads `CLAUDE.md` automatically and follows the agent instructions
 
 ## Recurring Runs
 
@@ -38,7 +38,7 @@ Since Cowork can't auto-schedule, you have two options:
 
 ## Recommended Workflow
 
-Use Cowork as your primary interactive environment and the AWS server as the background worker:
+Use Cowork as your primary interactive environment and optionally the AWS server as a background worker:
 - Cowork for: conversations, complex tasks, interactive work
 - AWS for: email triage, calendar checks, inbox processing, memory hygiene
 - Both share: ActingWeb memories, Dropbox files (if synced)

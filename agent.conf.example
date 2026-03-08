@@ -67,7 +67,7 @@ UBUNTU_USER="ubuntu"
 
 # --- MCP Connections ---------------------------------------------------------
 # ActingWeb Personal AI Memory (required — provides cross-session memory)
-# Sign up at https://ai.actingweb.io to get an account
+# Account is automatically created on first /mcp authentication
 # Authentication is handled via OAuth during setup-mcp.sh
 SETUP_ACTINGWEB=true
 

@@ -9,7 +9,7 @@
 #   - AWS CLI installed and configured
 #   - agent.conf in the same directory (copy from agent.conf.example)
 #   - An Anthropic API key
-#   - An ActingWeb account (for cross-session memory)
+#   - ActingWeb (for cross-session memory — account auto-created on first /mcp auth)
 #   - Node.js + npm (for local mcporter OAuth)
 #
 # Usage:
