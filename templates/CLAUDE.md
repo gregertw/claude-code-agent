@@ -15,6 +15,7 @@ This workspace is managed by an AI agent. It can also be used as an
 | `{OUTPUT_FOLDER}/tasks/` | Results from scheduled task runs and ActingWeb tasks. |
 | `{OUTPUT_FOLDER}/logs/` | Run logs from each agent cycle. |
 | `{OUTPUT_FOLDER}/research/` | Research output — meeting prep, background checks, topic research. |
+| `{OUTPUT_FOLDER}/improvements/` | Self-review proposals — agent-suggested improvements to its own instructions. |
 
 ## How to Work
 

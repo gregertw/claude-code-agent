@@ -90,6 +90,71 @@ Read the heartbeat file (at the output folder root, named `.agent-heartbeat`) to
 
 ---
 
+## 7. Self-Review (daily)
+
+**Type**: Self-Improvement
+**MCP required**: ActingWeb
+**Frequency**: Only run once per day (check date against last review in `output/improvements/`)
+
+Review recent activity and propose improvements. This is how the agent gets better over time.
+
+### What to review
+
+1. **Run logs** — Read the last 3–5 logs from `output/logs/`. Look for:
+   - Tasks that failed or were deferred repeatedly
+   - Warnings or errors that keep recurring
+   - Tasks that consistently take too long
+   - Patterns in what the agent is being asked to do
+
+2. **Inbox and ActingWeb task history** — Check `INBOX/_processed/` and recent task outputs. Look for:
+   - Recurring task themes that could become default tasks
+   - Task types the agent handles poorly or doesn't support
+   - Gaps between what the user asks for and what the agent delivers
+
+3. **Instruction quality** — Briefly review `ai/instructions/` files. Look for:
+   - Rules that conflict with observed behavior
+   - Missing guidance for task types the agent has encountered
+   - Outdated information
+
+4. **ActingWeb memories** — Search for recent learnings, corrections, and preferences. Look for:
+   - Preferences that should be reflected in instruction files
+   - Knowledge that could improve default task execution
+
+### What to produce
+
+Write a proposals file to `output/improvements/review-YYYY-MM-DD.md` with this structure:
+
+```markdown
+# Self-Review — YYYY-MM-DD
+
+## Summary
+<2-3 sentence overview of findings>
+
+## Proposed Changes
+
+### 1. <title>
+- **File**: <which instruction file to change>
+- **Type**: new-task | task-fix | instruction-update | workflow
+- **What**: <specific change to make>
+- **Why**: <evidence from logs or patterns>
+
+### 2. <title>
+...
+
+## Learnings Saved
+<list of memories saved to ActingWeb during this review>
+```
+
+### Rules
+
+- **Never auto-modify instruction files.** Always propose; let the user decide.
+- **Save durable learnings to ActingWeb memory** — e.g. "agent frequently fails at X because Y" or "user prefers Z approach for research tasks"
+- **Be specific.** Don't propose vague improvements like "be better at email." Propose concrete changes: "Add a rule to default-tasks.md email triage to always flag emails from @important-domain.com as actionable."
+- **Skip if nothing to improve.** Don't generate noise — if the last few runs were clean and the agent is working well, just log "No improvements needed" and move on.
+- **Keep it brief.** 3–5 proposals maximum per review.
+
+---
+
 ## Adding New Default Tasks
 
 To add a recurring task, add a new numbered section to this file following the same format:

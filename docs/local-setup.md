@@ -38,6 +38,7 @@ mkdir -p "$BRAIN_DIR/INBOX/_processed"
 mkdir -p "$BRAIN_DIR/output/tasks"
 mkdir -p "$BRAIN_DIR/output/logs"
 mkdir -p "$BRAIN_DIR/output/research"
+mkdir -p "$BRAIN_DIR/output/improvements"
 
 # Copy templates
 cp templates/CLAUDE.md "$BRAIN_DIR/CLAUDE.md"
@@ -117,6 +118,7 @@ These run automatically on every scheduled cycle (or when you say
 | **Inbox Folder Scan** | Checks `INBOX/` for new `.txt` and `.md` files you've dropped in, then executes them as tasks | — |
 | **ActingWeb Task Check** | Checks for tasks you've queued via the Context Builder and executes them | ActingWeb MCP |
 | **Memory Hygiene** | Runs weekly (Mondays only) — scans recent memories for duplicates or outdated entries | ActingWeb MCP |
+| **Self-Review** | Runs daily — reviews recent logs, identifies patterns, and writes improvement proposals to `output/improvements/` | ActingWeb MCP |
 | **Heartbeat Check** | Verifies the agent ran recently; warns if it's been more than 24 hours | — |
 
 Tasks that require an MCP connection you haven't set up are skipped with a warning —
@@ -158,6 +160,23 @@ Typical schedules:
 
 Scheduled tasks run while your Cowork session is open. When you start a new session,
 just ask the agent to set up the schedule again, or include it in your opening prompt.
+
+### Self-Improvement
+
+The agent reviews its own performance daily and proposes improvements. After each
+Self-Review, check `output/improvements/` for proposals — each one describes a
+specific change to an instruction file, with evidence from logs or task patterns.
+
+To act on a proposal, tell the agent in a Cowork session:
+
+```txt
+Read the latest improvement proposal in output/improvements/ and apply the changes
+I approve. Ask me about each one before making changes.
+```
+
+The agent never auto-modifies its own instructions — it always proposes and waits
+for your approval. Over time, this feedback loop makes the agent increasingly
+useful and tailored to your workflow.
 
 ### Customize
 

@@ -154,6 +154,26 @@ Structure your output as a markdown log. Each task should be logged in this form
 
 ---
 
+## Self-Improvement
+
+The agent actively looks for ways to improve its own instructions and offer more value.
+
+**Principle**: Propose, don't auto-modify. The agent writes improvement proposals to `output/improvements/` for the user to review and approve. It never edits its own instruction files without explicit user instruction.
+
+**How it works**:
+- The daily Self-Review task (see `default-tasks.md`) analyzes run logs, task patterns, and instruction quality
+- Concrete proposals are written to `output/improvements/review-YYYY-MM-DD.md`
+- Durable learnings are saved to ActingWeb memory so they persist across sessions
+- When the user reviews and approves a proposal, they (or the agent, on instruction) update the relevant files
+
+**What the agent learns from**:
+- Recurring failures or warnings in run logs
+- Patterns in user-submitted tasks (inbox and ActingWeb)
+- Corrections or feedback from the user
+- New capabilities discovered through MCP connections
+
+---
+
 ## Post-Run
 
 After all tasks are processed:

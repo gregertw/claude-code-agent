@@ -12,6 +12,8 @@
 #   agent tasks           List task outputs
 #   agent task <file>     View a task output
 #   agent inbox           List inbox files
+#   agent improvements    List improvement proposals
+#   agent improve [N]     View Nth most recent proposal (1=latest)
 #   agent heartbeat       Show heartbeat info
 #   agent help            Show this help
 # =============================================================================
@@ -274,6 +276,51 @@ cmd_inbox() {
   echo ""
 }
 
+cmd_improvements() {
+  local improve_dir="${OUTPUT_DIR}/improvements"
+  echo ""
+  echo -e "${BOLD}Improvement Proposals${NC}"
+  echo "─────────────────────────────────"
+  if [[ -d "$improve_dir" ]] && ls "$improve_dir"/review-*.md 1>/dev/null 2>&1; then
+    ls -1t "$improve_dir"/review-*.md | head -20 | while read -r f; do
+      local basename
+      basename=$(basename "$f")
+      # Extract date from filename: review-YYYY-MM-DD.md
+      local date_part
+      date_part=$(echo "$basename" | sed 's/review-\(.*\)\.md/\1/')
+      # Count proposals in file
+      local count
+      count=$(grep -c '^### [0-9]' "$f" 2>/dev/null || echo "0")
+      echo -e "  ${CYAN}${date_part}${NC}  ${count} proposal(s)  ${DIM}${basename}${NC}"
+    done
+  else
+    echo "  No improvement proposals yet."
+    echo ""
+    echo -e "  ${DIM}The agent's daily Self-Review task writes proposals here.${NC}"
+  fi
+  echo ""
+  echo -e "${DIM}Use: agent improve [N] to view (N=1 for latest)${NC}"
+  echo ""
+}
+
+cmd_improve() {
+  local n="${1:-1}"
+  local improve_dir="${OUTPUT_DIR}/improvements"
+
+  local file=""
+  if [[ -d "$improve_dir" ]]; then
+    file=$(ls -1t "${improve_dir}"/review-*.md 2>/dev/null | sed -n "${n}p")
+  fi
+
+  if [[ -z "$file" ]]; then
+    echo "No improvement proposal found at position ${n}."
+    return 1
+  fi
+  echo -e "${DIM}── $(basename "$file") ──${NC}"
+  echo ""
+  render_md "$file"
+}
+
 cmd_heartbeat() {
   local hb="${OUTPUT_DIR}/.agent-heartbeat"
   if [[ -f "$hb" ]]; then
@@ -304,6 +351,8 @@ cmd_help() {
   echo -e "  ${CYAN}agent tasks${NC}             List task outputs"
   echo -e "  ${CYAN}agent task <file>${NC}       View a task output"
   echo -e "  ${CYAN}agent inbox${NC}             List inbox files"
+  echo -e "  ${CYAN}agent improvements${NC}      List improvement proposals"
+  echo -e "  ${CYAN}agent improve [N]${NC}       View Nth most recent proposal (1=latest)"
   echo -e "  ${CYAN}agent heartbeat${NC}         Show heartbeat details"
   echo -e "  ${CYAN}agent help${NC}              Show this help"
   echo ""
@@ -319,6 +368,8 @@ case "${1:-status}" in
   tasks)     cmd_tasks "${2:-}" ;;
   task)      cmd_tasks "${2:-}" ;;
   inbox)     cmd_inbox ;;
+  improvements) cmd_improvements ;;
+  improve)   cmd_improve "${2:-1}" ;;
   heartbeat) cmd_heartbeat ;;
   help|-h|--help) cmd_help ;;
   *)

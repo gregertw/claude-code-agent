@@ -186,6 +186,7 @@ This works in both Option A and Option B.
 | `output/tasks/` | Results from scheduled runs and ActingWeb tasks |
 | `output/logs/` | Run logs from each agent cycle |
 | `output/research/` | Research output — meeting prep, background research |
+| `output/improvements/` | Self-review proposals — agent-suggested improvements |
 | `output/.agent-heartbeat` | Last-run timestamp (for monitoring) |
 
 ---
