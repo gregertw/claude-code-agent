@@ -31,8 +31,16 @@ DROPBOX_DIR="${HOME}/Dropbox"
 BRAIN_DIR="${DROPBOX_DIR}/${BRAIN_FOLDER}"
 
 # --- Check if already linked ------------------------------------------------
-if [[ -d "${DROPBOX_DIR}" ]] && dropbox-cli status 2>/dev/null | grep -q "Up to date"; then
-  log "Dropbox is already linked and running."
+# Dropbox is linked if ~/Dropbox exists (created on first successful link).
+# The service may or may not be running yet.
+if [[ -d "${DROPBOX_DIR}" ]]; then
+  log "Dropbox is already linked (~/Dropbox exists)."
+  # Make sure the service is enabled and running
+  if ! systemctl is-active --quiet dropbox.service 2>/dev/null; then
+    log "Starting Dropbox service..."
+    sudo systemctl enable dropbox.service 2>/dev/null || true
+    sudo systemctl start dropbox 2>/dev/null || true
+  fi
 else
   # --- Step 1: Link account --------------------------------------------------
   log "Linking Dropbox account..."
