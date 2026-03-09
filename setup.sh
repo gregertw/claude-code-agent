@@ -228,7 +228,8 @@ WantedBy=multi-user.target
 EOF
 
   systemctl daemon-reload
-  systemctl enable dropbox.service
+  # NOTE: Do not enable/start Dropbox service here — it needs account linking first.
+  # The setup-dropbox.sh script will enable and start it after the user links their account.
 
   # Copy Dropbox setup helper
   if [[ -f "${SCRIPT_DIR}/setup-dropbox.sh" ]]; then
@@ -408,7 +409,7 @@ log "Configuring Claude Code permissions for autonomous mode..."
 CLAUDE_SETTINGS_DIR="${HOME_DIR}/.claude"
 sudo -u "${UBUNTU_USER}" mkdir -p "${CLAUDE_SETTINGS_DIR}"
 
-cat > "${CLAUDE_SETTINGS_DIR}/settings.json" << 'SETTINGS'
+sudo -u "${UBUNTU_USER}" tee "${CLAUDE_SETTINGS_DIR}/settings.json" > /dev/null << 'SETTINGS'
 {
   "permissions": {
     "allow": [
@@ -433,7 +434,6 @@ cat > "${CLAUDE_SETTINGS_DIR}/settings.json" << 'SETTINGS'
   }
 }
 SETTINGS
-chown -R "${UBUNTU_USER}:${UBUNTU_USER}" "${CLAUDE_SETTINGS_DIR}"
 log "Claude Code permissions configured."
 
 # --- 17. Agent Orchestrator --------------------------------------------------
@@ -533,7 +533,7 @@ if [[ "$MODE" == "scheduled" ]]; then
   systemctl enable agent-boot-runner.service
   echo "Switched to SCHEDULED mode."
   echo "  Instance will run tasks at boot and then stop itself."
-  echo "  Use deploy-scheduler.sh to set up EventBridge."
+  echo "  Use ./agent-manager.sh --scheduled from your local machine to set up EventBridge."
   echo "  To prevent self-stop during SSH: touch ~/agents/.keep-running"
 else
   systemctl disable agent-boot-runner.service
@@ -575,7 +575,9 @@ if [[ -f "${SCRIPT_DIR}/agent-cli.sh" ]]; then
   cp "${SCRIPT_DIR}/agent-cli.sh" "${HOME_DIR}/scripts/agent-cli.sh"
   chmod +x "${HOME_DIR}/scripts/agent-cli.sh"
   chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/agent-cli.sh"
-  ln -sf "${HOME_DIR}/scripts/agent-cli.sh" /usr/local/bin/agent
+  # Install as a copy (not symlink) so permissions are independent
+  cp "${HOME_DIR}/scripts/agent-cli.sh" /usr/local/bin/agent
+  chmod +x /usr/local/bin/agent
   log "Agent CLI installed. Use: agent status, agent run, agent logs, etc."
 else
   warn "agent-cli.sh not found in ${SCRIPT_DIR}. Upload it manually."
@@ -736,17 +738,20 @@ else
   BRAIN="\${HOME}/brain"
 fi
 
-TEMPLATES="\${HOME}/pending-templates"
+# Try pending-templates first, fall back to agent-server/templates
+if [[ -d "\${HOME}/pending-templates" ]]; then
+  TEMPLATES="\${HOME}/pending-templates"
+elif [[ -d "\${HOME}/agent-server/templates" ]]; then
+  TEMPLATES="\${HOME}/agent-server/templates"
+else
+  echo "No templates found. Nothing to install."
+  exit 0
+fi
 
 if [[ ! -d "\${BRAIN}" ]]; then
   echo "ERROR: \${BRAIN} not found."
   [[ "\${FILE_SYNC}" == "dropbox" ]] && echo "Is Dropbox synced?"
   exit 1
-fi
-
-if [[ ! -d "\${TEMPLATES}" ]]; then
-  echo "No pending templates found. Nothing to install."
-  exit 0
 fi
 
 mkdir -p "\${BRAIN}/ai/instructions"
@@ -874,7 +879,7 @@ STEP=$((STEP + 1))
 
 if [[ "${SCHEDULE_MODE}" == "scheduled" ]]; then
   echo "${STEP}. SET UP EVENTBRIDGE SCHEDULER (from your local machine)"
-  echo "   ./deploy-scheduler.sh <instance-id>"
+  echo "   ./agent-manager.sh --scheduled"
   echo ""
   STEP=$((STEP + 1))
 fi

@@ -68,9 +68,17 @@ echo "Inbox dir: ${INBOX_DIR}"
 echo "Run log: ${RUN_LOG}"
 
 # --- Pre-flight checks -------------------------------------------------------
+# Claude Code can authenticate via API key OR account login (Pro/Max/Enterprise).
+# Check that at least one method is available.
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  echo "ERROR: ANTHROPIC_API_KEY not set. Aborting."
-  exit 1
+  # No API key — check if Claude Code has stored credentials (account login)
+  CRED_FILE="${HOME_DIR}/.claude/.credentials.json"
+  if [[ -f "${CRED_FILE}" ]] && python3 -c "import json; d=json.load(open('${CRED_FILE}')); assert d.get('claudeAiOauth',{}).get('accessToken')" 2>/dev/null; then
+    echo "Using account login (no API key)."
+  else
+    echo "ERROR: No authentication found. Set ANTHROPIC_API_KEY or log in via 'claude' first."
+    exit 1
+  fi
 fi
 
 # Check for keep-running lock (in scheduled mode)
@@ -191,20 +199,29 @@ echo ""
 
 cd "${BRAIN_DIR}"
 
-# Build allowed MCP tools list from Claude Code's config
-ALLOWED_MCP_TOOLS=""
+# Build allowed tools list — explicit CLI flags are more reliable than
+# settings.json alone in non-interactive mode (see GitHub issue #581)
+ALLOWED_TOOLS=()
+
+# Core tools for file operations
+ALLOWED_TOOLS+=("Read" "Write" "Edit" "Glob" "Grep" "WebSearch" "WebFetch")
+ALLOWED_TOOLS+=("Bash(cat *)" "Bash(mkdir *)" "Bash(mv *)" "Bash(ls *)" "Bash(date *)")
+if [[ "${FILE_SYNC}" == "dropbox" ]]; then
+  ALLOWED_TOOLS+=("Bash(dropbox-cli *)")
+fi
+
+# MCP tools from Claude Code's config
 CLAUDE_CONFIG="${HOME_DIR}/.claude.json"
 if [[ -f "${CLAUDE_CONFIG}" ]]; then
-  MCP_SERVERS=$(python3 -c "
+  while IFS= read -r server; do
+    [[ -n "$server" ]] && ALLOWED_TOOLS+=("mcp__${server}")
+  done < <(python3 -c "
 import json
 with open('${CLAUDE_CONFIG}') as f:
     d = json.load(f)
 for name in d.get('mcpServers', {}):
-    print(f'mcp__{name}')
+    print(name)
 " 2>/dev/null || true)
-  if [[ -n "${MCP_SERVERS}" ]]; then
-    ALLOWED_MCP_TOOLS="--allowedTools ${MCP_SERVERS}"
-  fi
 fi
 
 # Run Claude in non-interactive mode with the master prompt
@@ -212,7 +229,7 @@ fi
 claude -p "${MASTER_PROMPT}" \
   --output-format text \
   --max-turns 50 \
-  ${ALLOWED_MCP_TOOLS} \
+  --allowedTools "${ALLOWED_TOOLS[@]}" \
   2>&1 | tee "${RUN_LOG}"
 
 CLAUDE_EXIT=$?
@@ -248,10 +265,38 @@ if [[ ${LOG_COUNT} -gt 100 ]]; then
   ls -1t "${LOG_DIR}"/orchestrator-*.log | tail -n +101 | xargs rm -f
 fi
 
-# --- 10. Self-stop (scheduled mode) -----------------------------------------
+# --- 10. Print status summary (paste-friendly for AI) -----------------------
 echo ""
-echo "=== Orchestrator finished at $(date) ==="
+echo "============================================================"
+echo "AGENT RUN COMPLETE"
+echo "============================================================"
+echo ""
+echo "Finished: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "Exit code: ${CLAUDE_EXIT}"
+echo "Run log: $(basename "${RUN_LOG}")"
+echo "Mode: ${SCHEDULE_MODE:-always-on}"
 
+# Count inbox files (remaining)
+INBOX_REMAINING=0
+if [[ -d "${INBOX_DIR}" ]]; then
+  INBOX_REMAINING=$(find "${INBOX_DIR}" -maxdepth 1 \( -name '*.txt' -o -name '*.md' \) ! -name '_*' 2>/dev/null | wc -l | tr -d ' ')
+fi
+echo "Inbox remaining: ${INBOX_REMAINING}"
+
+if [[ "${FILE_SYNC}" == "dropbox" ]]; then
+  echo "Dropbox: ${FINAL_STATUS:-not checked}"
+fi
+
+if [[ ${CLAUDE_EXIT} -ne 0 ]]; then
+  echo ""
+  echo "WARNING: Claude Code exited with error code ${CLAUDE_EXIT}."
+  echo "Check the run log: agent log"
+fi
+
+echo ""
+echo "============================================================"
+
+# --- 11. Self-stop (scheduled mode) -----------------------------------------
 if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && "${NO_STOP}" != "--no-stop" ]]; then
   echo "Scheduled mode: shutting down instance in 10 seconds..."
   echo "(Cancel with: touch ~/agents/.keep-running)"

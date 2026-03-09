@@ -28,19 +28,15 @@ Keep each task small (under 2 minutes). The agent will defer tasks that seem too
 
 ## Changing the Schedule
 
+Use `agent-manager.sh` from your local machine — it handles both the server
+config and the EventBridge scheduler in one command:
+
 ```bash
 # Switch modes
-sudo ~/scripts/set-schedule-mode.sh scheduled   # or always-on
-
-# Change interval (from your local machine)
-./deploy-scheduler.sh <instance-id> 30           # every 30 min
-./deploy-scheduler.sh <instance-id> 120          # every 2 hours
-
-# Pause scheduling
-aws scheduler update-schedule --name agent-server-start --state DISABLED --region <region> ...
-
-# Resume
-aws scheduler update-schedule --name agent-server-start --state ENABLED --region <region> ...
+./agent-manager.sh --always-on        # run 24/7, remove scheduler
+./agent-manager.sh --scheduled        # wake every 60 min (default)
+./agent-manager.sh --scheduled 30     # wake every 30 min
+./agent-manager.sh --scheduled 120    # wake every 2 hours
 ```
 
 ## Customizing the Master Prompt

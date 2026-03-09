@@ -363,22 +363,22 @@ POST_STEPS=""
 STEP_NUM=1
 
 if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Link Dropbox (~/setup-dropbox.sh)"
+  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Link Dropbox: ./agent-manager.sh --ssh, then ~/setup-dropbox.sh"
   STEP_NUM=$((STEP_NUM + 1))
 fi
 
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate Claude Code (API key or account login)"
+  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate Claude Code: ./agent-manager.sh --ssh-mcp, then run 'claude'"
   STEP_NUM=$((STEP_NUM + 1))
 else
-  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Verify Claude Code authentication"
+  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Verify Claude Code: ./agent-manager.sh --ssh-mcp, then run 'claude'"
   STEP_NUM=$((STEP_NUM + 1))
 fi
 
-POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate MCP servers (/mcp in Claude Code)"
+POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate MCP servers: /mcp in Claude Code (same SSH session)"
 STEP_NUM=$((STEP_NUM + 1))
 
-POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Test the orchestrator"
+POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Test the orchestrator: ~/scripts/agent-orchestrator.sh --no-stop"
 
 echo ""
 echo "============================================================"
@@ -387,10 +387,6 @@ echo "DEPLOY STATUS: SUCCESS"
 echo ""
 echo "Instance ID:  ${INSTANCE_ID}"
 echo "Elastic IP:   ${ELASTIC_IP}"
-echo "SSH command:  ssh ${SSH_HOST}"
-if [[ "${INSTALL_TTYD}" == "true" ]]; then
-  echo "Web terminal: https://${ELASTIC_IP}"
-fi
 echo "Region:       ${AWS_REGION}"
 echo "Mode:         ${SCHEDULE_MODE}"
 echo "File sync:    ${FILE_SYNC}"
@@ -400,6 +396,18 @@ if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
 else
   echo "API key:      not set (use login or set manually)"
 fi
+if [[ "${INSTALL_TTYD}" == "true" ]]; then
+  echo "Web terminal: https://${ELASTIC_IP}"
+fi
+echo ""
+echo "Management commands (from this directory):"
+echo "  ./agent-manager.sh              Show server status"
+echo "  ./agent-manager.sh --ssh        SSH into the server"
+echo "  ./agent-manager.sh --ssh-mcp    SSH with MCP port forwarding"
+echo "  ./agent-manager.sh --wakeup     Start a stopped instance"
+echo "  ./agent-manager.sh --sleep      Stop the instance"
+echo "  ./agent-manager.sh --always-on  Switch to always-on mode"
+echo "  ./agent-manager.sh --scheduled  Switch to scheduled mode"
 echo ""
 echo "Post-deploy steps needed:"
 echo -e "${POST_STEPS}"

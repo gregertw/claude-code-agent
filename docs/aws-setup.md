@@ -156,9 +156,13 @@ MCP servers need OAuth authentication. Since there's no browser on the
 server, use SSH port forwarding so the OAuth callback reaches the server
 from your local browser.
 
+If you used `deploy.sh`, SSH config is already set up and you can use
+`agent-manager.sh`. For manual setup, configure SSH first (Step 8 below),
+then come back here.
+
 ```bash
-# On your LOCAL machine — SSH in with port forwarding:
-ssh -L 18850:127.0.0.1:18850 -L 18851:127.0.0.1:18851 -L 18852:127.0.0.1:18852 agent
+# On your LOCAL machine — connect with MCP port forwarding:
+./agent-manager.sh --ssh-mcp
 
 # Start Claude Code:
 claude
@@ -175,11 +179,13 @@ Port mapping: ActingWeb=18850, Gmail=18851, Calendar=18852
 #### Test the orchestrator
 
 ```bash
-ssh agent
+# Still in the SSH session:
 ~/scripts/agent-orchestrator.sh --no-stop
 ```
 
 ### Step 8: Set Up Local SSH Config
+
+> **Note:** `deploy.sh` configures this automatically. Only needed for manual setup.
 
 Add to `~/.ssh/config` on your local machine:
 
@@ -192,7 +198,7 @@ Host agent
   ServerAliveCountMax 3
 ```
 
-Now just: `ssh agent`
+Now use `agent-manager.sh` or just: `ssh agent`
 
 ---
 
@@ -235,24 +241,13 @@ Instance starts on a schedule, runs all tasks, then stops itself.
 
 ### Switching Modes
 
-```bash
-# SSH into the instance first
-sudo ~/scripts/set-schedule-mode.sh scheduled    # or always-on
-cat ~/.agent-schedule                             # check current mode
-```
-
-When switching to scheduled mode, deploy the scheduler from your local machine:
+Use `agent-manager.sh` from your local machine — it handles both the server
+config and the EventBridge scheduler in one command:
 
 ```bash
-./deploy-scheduler.sh <instance-id>           # every 60 min (default)
-./deploy-scheduler.sh <instance-id> 30        # every 30 min
-./deploy-scheduler.sh <instance-id> 120       # every 2 hours
-```
-
-When switching to always-on:
-
-```bash
-./deploy-scheduler.sh --remove
+./agent-manager.sh --always-on       # switch to always-on, remove scheduler
+./agent-manager.sh --scheduled       # switch to scheduled (every 60 min)
+./agent-manager.sh --scheduled 30    # scheduled, every 30 min
 ```
 
 ### Manual Wakeup
@@ -261,14 +256,10 @@ In scheduled mode the instance is normally stopped between runs. To start it
 manually (e.g., to SSH in, run a task, or debug):
 
 ```bash
-# From your LOCAL machine — start the instance
-aws ec2 start-instances --instance-ids <instance-id> --region <region>
-
-# Wait for it to be running
-aws ec2 wait instance-running --instance-ids <instance-id> --region <region>
-
-# SSH in
-ssh agent
+# From your LOCAL machine:
+./agent-manager.sh --wakeup     # starts instance and waits for SSH
+./agent-manager.sh --sleep      # stops the instance
+./agent-manager.sh              # show server status
 ```
 
 Or use the AWS Console: EC2 → Instances → select `agent-server` → Instance
@@ -287,7 +278,7 @@ If you just want to trigger a one-off task run without keeping the instance
 alive, use the `agent` CLI:
 
 ```bash
-ssh agent
+./agent-manager.sh --ssh
 agent run                         # runs the full orchestrator
 agent run "Your custom prompt"    # runs a one-off task
 ```
@@ -296,6 +287,15 @@ agent run "Your custom prompt"    # runs a one-off task
 
 ## Viewing Logs
 
+From your local machine:
+```bash
+./agent-manager.sh --ssh             # connect to the server
+agent logs                           # list recent run logs
+agent log                            # view latest run log
+agent log 2                          # view second-latest
+```
+
+Or directly:
 ```bash
 ls -lt ~/logs/                     # recent logs
 cat ~/logs/agent-run-*.md          # full run logs (markdown)
@@ -368,7 +368,7 @@ htop
 2. Associate the Elastic IP with the new instance
 3. Upload the agent-server directory and run `setup.sh`
 4. Set API key, link Dropbox (if using), run `setup-mcp.sh`
-5. If using scheduled mode: `deploy-scheduler.sh` with new instance ID
+5. If using scheduled mode: `./agent-manager.sh --scheduled`
 
 Keep this directory in your Dropbox or backed up — it's the source of truth for rebuilding.
 

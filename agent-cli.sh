@@ -127,11 +127,15 @@ cmd_status() {
   log_count=$(ls -1 "${LOG_DIR}"/agent-run-*.md 2>/dev/null | wc -l | tr -d ' ')
   echo -e "  Run logs:   ${log_count} total"
 
-  # MCP config
-  if [[ -f "${HOME}/.agent-mcp-config.json" ]]; then
+  # MCP config (read from Claude Code's config file)
+  if [[ -f "${HOME}/.claude.json" ]]; then
     local mcp_servers
-    mcp_servers=$(python3 -c "import json; d=json.load(open('${HOME}/.agent-mcp-config.json')); print(', '.join(d.get('mcpServers',{}).keys()))" 2>/dev/null || echo "?")
-    echo -e "  MCP:        ${mcp_servers}"
+    mcp_servers=$(python3 -c "import json; d=json.load(open('${HOME}/.claude.json')); servers=d.get('mcpServers',{}); print(', '.join(servers.keys()) if servers else '')" 2>/dev/null || echo "")
+    if [[ -n "${mcp_servers}" ]]; then
+      echo -e "  MCP:        ${mcp_servers}"
+    else
+      echo -e "  MCP:        ${DIM}not configured${NC}"
+    fi
   else
     echo -e "  MCP:        ${DIM}not configured${NC}"
   fi

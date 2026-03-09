@@ -52,11 +52,18 @@ else
   echo ""
   read -r -p "Press Enter to start Dropbox linking..."
 
-  # Run dropboxd in foreground for account linking
-  "${HOME}/.dropbox-dist/dropboxd" || true
+  # Run dropboxd in foreground for account linking.
+  # Trap SIGINT so Ctrl-C only kills dropboxd, not this script.
+  trap '' INT
+  "${HOME}/.dropbox-dist/dropboxd" &
+  DBPID=$!
+  trap "kill $DBPID 2>/dev/null; wait $DBPID 2>/dev/null" INT
+  wait $DBPID 2>/dev/null || true
+  trap - INT
 
   echo ""
-  log "Starting Dropbox service..."
+  log "Enabling and starting Dropbox service..."
+  sudo systemctl enable dropbox.service
   sudo systemctl start dropbox
 fi
 

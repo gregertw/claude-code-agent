@@ -80,9 +80,12 @@ Then guide the user through each remaining step below.
 
 Skip this step if not using Dropbox.
 
-Tell the user to run:
+Tell the user to connect to the server using `agent-manager.sh`:
 ```
-ssh agent
+./agent-manager.sh --ssh
+```
+Then run the Dropbox setup:
+```
 ~/setup-dropbox.sh
 ```
 The script will:
@@ -96,9 +99,9 @@ is normal. After the script finishes, tell them to type `exit` to disconnect.
 
 #### B6: Authenticate Claude Code on the server
 
-Tell the user to SSH into the server with port forwarding for MCP OAuth:
+Tell the user to connect with MCP port forwarding (needed for OAuth):
 ```
-ssh -L 18850:127.0.0.1:18850 -L 18851:127.0.0.1:18851 -L 18852:127.0.0.1:18852 agent
+./agent-manager.sh --ssh-mcp
 ```
 
 Then run Claude Code interactively:
@@ -133,7 +136,7 @@ After all servers are authenticated, tell the user to type `/exit`.
 
 #### B8: Test the orchestrator
 
-Tell the user:
+Tell the user (still in the SSH session):
 ```
 ~/scripts/agent-orchestrator.sh --no-stop
 ```
@@ -331,4 +334,5 @@ This works in both Option A and Option B.
 | `agent-orchestrator.sh` | Main startup script — full task cycle (Option B) |
 | `deploy.sh` | One-command deploy — creates all AWS resources (Option B) |
 | `teardown.sh` | One-command teardown — destroys all AWS resources (Option B) |
-| `deploy-scheduler.sh` | Create/remove EventBridge scheduler (Option B) |
+| `agent-manager.sh` | Local management — status, wakeup, sleep, mode switch, SSH (Option B) |
+| `deploy-scheduler.sh` | Create/remove EventBridge scheduler (used by agent-manager.sh) |
