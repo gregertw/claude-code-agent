@@ -362,17 +362,20 @@ STEP_NUM=1
 
 POST_STEPS="${POST_STEPS}\n   Connect with: ./agent-manager.sh --ssh-mcp (use one session for all steps)\n"
 
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Log into Claude Code:"
+  POST_STEPS="${POST_STEPS}\n   claude"
+  POST_STEPS="${POST_STEPS}\n   (Complete theme selection + account login, then /exit)"
+  STEP_NUM=$((STEP_NUM + 1))
+fi
+
 POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Run post-deploy setup: ~/agent-setup.sh"
-POST_STEPS="${POST_STEPS}\n   (Handles Dropbox, brain directory, templates, and MCP registration)"
+POST_STEPS="${POST_STEPS}\n   (Handles Dropbox, brain directory, and MCP registration in one pass)"
 STEP_NUM=$((STEP_NUM + 1))
 
-if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate Claude Code and MCP servers:"
-  POST_STEPS="${POST_STEPS}\n   Follow the next-steps printed by agent-setup.sh"
-else
-  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate MCP servers (if needed):"
-  POST_STEPS="${POST_STEPS}\n   Follow the next-steps printed by agent-setup.sh"
-fi
+POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate MCP servers:"
+POST_STEPS="${POST_STEPS}\n   cd ~/Dropbox/brain && claude"
+POST_STEPS="${POST_STEPS}\n   Run /mcp and authenticate each server, then /exit"
 STEP_NUM=$((STEP_NUM + 1))
 
 POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Test the orchestrator: ~/scripts/agent-orchestrator.sh --no-stop"

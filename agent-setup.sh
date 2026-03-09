@@ -106,35 +106,72 @@ if [[ "${FILE_SYNC}" == "dropbox" ]]; then
     ok "Account linked successfully"
   fi
 
-  # 1b. Selective sync — exclude everything except brain folder
-  # Uses maestral ls to query remote folders BEFORE syncing them down.
-  MAESTRAL_AUTH=$("${MAESTRAL_BIN}" auth status 2>/dev/null || true)
-  if echo "${MAESTRAL_AUTH}" | grep -qi "linked"; then
+  # 1b. Ensure Maestral daemon is running (auth link may have started it)
+  MAESTRAL_RUNNING=false
+  if "${MAESTRAL_BIN}" status 2>/dev/null | grep -qi "Status:"; then
+    MAESTRAL_RUNNING=true
+    ok "Maestral daemon running"
+  elif [[ "${VERIFY_ONLY}" != "true" ]]; then
+    log "Starting Maestral daemon..."
+    # Try systemd user service first
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable maestral.service 2>/dev/null || true
+    systemctl --user start maestral.service 2>/dev/null || true
+    sleep 3
+
+    if "${MAESTRAL_BIN}" status 2>/dev/null | grep -qi "Status:"; then
+      MAESTRAL_RUNNING=true
+      ok "Maestral started via systemd"
+    else
+      # Fallback: start directly
+      "${MAESTRAL_BIN}" start 2>/dev/null || true
+      sleep 3
+      if "${MAESTRAL_BIN}" status 2>/dev/null | grep -qi "Status:"; then
+        MAESTRAL_RUNNING=true
+        ok "Maestral started directly"
+      else
+        warn "Maestral failed to start"
+        ISSUES=$((ISSUES + 1))
+      fi
+    fi
+  else
+    need "Maestral not running"
+    ISSUES=$((ISSUES + 1))
+  fi
+
+  # 1c. Selective sync — exclude everything except brain folder
+  # Uses maestral ls to query remote folders from the server BEFORE syncing them down.
+  if [[ "${MAESTRAL_RUNNING}" == "true" ]]; then
 
     # Get current exclusion list
     EXCLUDED_LIST=$("${MAESTRAL_BIN}" excluded list 2>/dev/null || true)
 
-    # List remote top-level folders (queries Dropbox server, no local sync needed)
+    # List remote top-level entries (queries Dropbox server, no local sync needed)
     log "Querying Dropbox for folder listing..."
-    REMOTE_FOLDERS=$("${MAESTRAL_BIN}" ls 2>/dev/null || true)
+    REMOTE_OUTPUT=$("${MAESTRAL_BIN}" ls 2>&1 || true)
+    echo "  Remote folders found:"
+    echo "${REMOTE_OUTPUT}" | head -20 | sed 's/^/    /'
 
     EXCLUDED=0
     ALREADY_EXCLUDED=0
     while IFS= read -r item; do
-      # Skip empty lines and the brain folder
+      # Skip empty lines
       [[ -z "$item" ]] && continue
-      # maestral ls output may have trailing slashes or whitespace
-      item=$(echo "$item" | sed 's/[[:space:]]*$//' | sed 's/\/$//')
+      # Strip whitespace and trailing slashes
+      item=$(echo "$item" | xargs | sed 's/\/$//')
       [[ -z "$item" ]] && continue
-      [[ "$item" == "${BRAIN_FOLDER}" ]] && continue
+      # Skip the brain folder
+      [[ "${item,,}" == "${BRAIN_FOLDER,,}" ]] && continue
 
       # Check if already excluded
-      if echo "${EXCLUDED_LIST}" | grep -q "$item" 2>/dev/null; then
+      if echo "${EXCLUDED_LIST}" | grep -qi "$item" 2>/dev/null; then
         ALREADY_EXCLUDED=$((ALREADY_EXCLUDED + 1))
       else
-        "${MAESTRAL_BIN}" excluded add "$item" 2>/dev/null && EXCLUDED=$((EXCLUDED + 1)) || true
+        if "${MAESTRAL_BIN}" excluded add "$item" 2>&1; then
+          EXCLUDED=$((EXCLUDED + 1))
+        fi
       fi
-    done <<< "${REMOTE_FOLDERS}"
+    done <<< "${REMOTE_OUTPUT}"
 
     if [[ $EXCLUDED -gt 0 ]]; then
       ok "Excluded ${EXCLUDED} folder(s) from sync"
@@ -145,42 +182,9 @@ if [[ "${FILE_SYNC}" == "dropbox" ]]; then
     if [[ $EXCLUDED -eq 0 && $ALREADY_EXCLUDED -eq 0 ]]; then
       ok "Selective sync configured (only '${BRAIN_FOLDER}/' syncing)"
     fi
-  fi
-
-  # 1c. Start Maestral service
-  # Use systemd user service (requires loginctl enable-linger, done in setup.sh)
-  MAESTRAL_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null | grep -i "Status:" | sed 's/.*Status:[[:space:]]*//' || true)
-
-  if [[ -n "${MAESTRAL_STATUS}" && "${MAESTRAL_STATUS}" != *"not running"* ]]; then
-    ok "Maestral running (${MAESTRAL_STATUS})"
-  elif [[ "${VERIFY_ONLY}" == "true" ]]; then
-    need "Maestral not running"
-    ISSUES=$((ISSUES + 1))
   else
-    log "Starting Maestral..."
-    # Enable and start the systemd user service
-    systemctl --user daemon-reload 2>/dev/null || true
-    systemctl --user enable maestral.service 2>/dev/null || true
-    systemctl --user start maestral.service 2>/dev/null || true
-    sleep 3
-
-    # Verify it started
-    MAESTRAL_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null | grep -i "Status:" | sed 's/.*Status:[[:space:]]*//' || true)
-    if [[ -n "${MAESTRAL_STATUS}" ]]; then
-      ok "Maestral started (${MAESTRAL_STATUS})"
-    else
-      # Fallback: start directly
-      warn "Systemd service didn't start, starting Maestral directly..."
-      "${MAESTRAL_BIN}" start 2>/dev/null || true
-      sleep 3
-      MAESTRAL_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null | grep -i "Status:" | sed 's/.*Status:[[:space:]]*//' || true)
-      if [[ -n "${MAESTRAL_STATUS}" ]]; then
-        ok "Maestral started (${MAESTRAL_STATUS})"
-      else
-        warn "Maestral failed to start"
-        ISSUES=$((ISSUES + 1))
-      fi
-    fi
+    warn "Skipping selective sync — Maestral not running"
+    ISSUES=$((ISSUES + 1))
   fi
 
   echo ""
@@ -431,35 +435,40 @@ fi
 # Show next steps if needed
 NEXT_STEPS=false
 
-if [[ "${CLAUDE_AUTH}" == "none" || "${MCP_NEEDS_AUTH}" == "true" ]]; then
+NEXT_NUM=1
+
+if [[ "${CLAUDE_AUTH}" == "none" ]]; then
   NEXT_STEPS=true
   echo ""
   echo -e "${BOLD}Next steps:${NC}"
   echo ""
-  echo "  Make sure you connected with SSH port forwarding:"
-  echo "    ./agent-manager.sh --ssh-mcp"
+  echo "  ${NEXT_NUM}. Log into Claude Code first:"
+  echo "    claude"
+  echo "    (Complete theme selection + login, then /exit)"
+  NEXT_NUM=$((NEXT_NUM + 1))
   echo ""
-  echo "  Start Claude Code in the brain directory:"
-  echo "    cd ${BRAIN_DIR} && claude"
-  echo ""
-
-  NEXT_NUM=1
-  if [[ "${CLAUDE_AUTH}" == "none" ]]; then
-    echo "  ${NEXT_NUM}. Complete Claude Code login (theme + API key or account)"
-    echo "     Then re-run ~/agent-setup.sh to register MCP servers"
-    NEXT_NUM=$((NEXT_NUM + 1))
-  fi
-
-  if [[ "${MCP_NEEDS_AUTH}" == "true" ]]; then
-    echo "  ${NEXT_NUM}. Run /mcp and authenticate each server that needs it"
-  fi
-
-  echo ""
-  echo "  Then /exit and test: ~/scripts/agent-orchestrator.sh --no-stop"
+  echo "  ${NEXT_NUM}. Re-run this script to register MCP servers:"
+  echo "    ~/agent-setup.sh"
+  NEXT_NUM=$((NEXT_NUM + 1))
 fi
 
-if [[ "${NEXT_STEPS}" == "false" ]]; then
+if [[ "${MCP_NEEDS_AUTH}" == "true" ]]; then
+  NEXT_STEPS=true
+  if [[ "${CLAUDE_AUTH}" != "none" ]]; then
+    echo ""
+    echo -e "${BOLD}Next steps:${NC}"
+  fi
   echo ""
+  echo "  ${NEXT_NUM}. Authenticate MCP servers:"
+  echo "    cd ${BRAIN_DIR} && claude"
+  echo "    Run /mcp and authenticate each server, then /exit"
+  NEXT_NUM=$((NEXT_NUM + 1))
+fi
+
+echo ""
+if [[ "${NEXT_STEPS}" == "true" ]]; then
+  echo "  ${NEXT_NUM}. Test the agent: ~/scripts/agent-orchestrator.sh --no-stop"
+else
   echo "  Test the agent: ~/scripts/agent-orchestrator.sh --no-stop"
 fi
 

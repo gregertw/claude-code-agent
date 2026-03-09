@@ -119,7 +119,17 @@ Connect with SSH port forwarding (required for OAuth authentication):
 # Or for manual setup: ssh -L 18850:127.0.0.1:18850 -L 18851:127.0.0.1:18851 -L 18852:127.0.0.1:18852 agent
 ```
 
-Then on the server, run the unified setup script:
+**Log into Claude Code first** (if not using an API key):
+
+```bash
+claude
+# Complete theme selection + account login, then /exit
+```
+
+This initializes Claude Code so that `agent-setup.sh` can register MCP servers
+in the same pass.
+
+Then run the unified setup script:
 
 ```bash
 ~/agent-setup.sh
@@ -127,10 +137,10 @@ Then on the server, run the unified setup script:
 
 This handles everything in the right order based on `agent.conf`:
 
-1. **Dropbox** (if configured): links account, configures selective sync, starts service
+1. **Dropbox** (if configured): links Maestral, configures selective sync, starts daemon
 2. **Brain directory**: creates folders and installs template files
-3. **Claude Code**: checks authentication status
-4. **MCP servers**: registers any that aren't already connected (requires Claude Code to be initialized first)
+3. **Claude Code**: verifies authentication
+4. **MCP servers**: registers servers configured in `agent.conf`
 
 The script is safe to re-run — each step checks if it's already done and skips it.
 
@@ -139,23 +149,13 @@ authorize the app, and paste the authorization code back into the terminal. Maes
 queries your Dropbox folders from the server and excludes everything except the brain folder
 — no files are downloaded until selective sync is configured.
 
-At the end, the script prints next steps if anything still needs attention.
+### Step 6: Authenticate MCP Servers
 
-### Step 6: Authenticate Claude Code and MCP Servers
-
-If `agent-setup.sh` reported that authentication is needed, follow its instructions.
-Still in the same SSH session:
+Start Claude Code in the brain directory and authenticate each MCP server:
 
 ```bash
-# Change to the brain directory (path depends on your agent.conf):
 cd ~/Dropbox/brain    # or ~/brain if not using Dropbox
-
-# Start Claude Code:
 claude
-# On first run, Claude Code asks for light/dark theme and then
-# authentication (API key or account login). Complete that first.
-
-# Then authenticate each MCP server:
 # /mcp → select server → Authenticate → browser opens for sign-in
 # Repeat for each server, then /exit
 ```
