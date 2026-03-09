@@ -96,7 +96,7 @@ Then run the Dropbox setup:
 ```
 The script will:
 1. Start `dropboxd` and print a URL — tell them to open it in their browser
-2. After they see "This computer is now linked to Dropbox.", press Ctrl-C
+2. Automatically detect when the account is linked and continue
 3. Configure selective sync (only the brain folder syncs)
 4. Install template files
 

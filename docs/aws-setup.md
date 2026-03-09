@@ -119,8 +119,8 @@ sudo ./setup.sh
 The `setup-dropbox.sh` script handles the full Dropbox setup in one go:
 
 1. **Links your account** — runs `dropboxd`, which prints a URL to open in your
-   browser. After authorizing, wait for "This computer is now linked to Dropbox."
-   then Ctrl-C.
+   browser. After authorizing, the script automatically detects the "linked"
+   message and continues.
 2. **Configures selective sync** — excludes everything from syncing except your
    brain folder (`brain/` by default). This prevents the server from downloading
    your entire Dropbox.
@@ -130,9 +130,8 @@ The `setup-dropbox.sh` script handles the full Dropbox setup in one go:
 **What to expect from `dropboxd`:** The first run prints several `dropbox: load fq extension`
 lines and a deprecation warning — these are normal and can be ignored. It then prints a
 URL to visit. After you authorize in the browser, you'll see
-`This computer is now linked to Dropbox. Welcome <your name>`. It may then self-update
-(more `load fq extension` lines) and eventually print `Killed` as it restarts itself.
-Press Enter to get your shell prompt back, then Ctrl-C if the process is still running.
+`This computer is now linked to Dropbox. Welcome <your name>` and the script continues
+automatically.
 
 ```bash
 # c) Verify Claude Code

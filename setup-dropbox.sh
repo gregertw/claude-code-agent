@@ -44,22 +44,50 @@ else
   echo "  Ignore the 'load fq extension' and deprecation warnings"
   echo "  — they are normal."
   echo ""
-  echo "  Wait until you see:"
-  echo "    'This computer is now linked to Dropbox. Welcome ...'"
-  echo ""
-  echo "  Then press Ctrl-C to stop the foreground process."
+  echo "  The script will continue automatically once linked."
   echo "============================================================"
   echo ""
   read -r -p "Press Enter to start Dropbox linking..."
 
-  # Run dropboxd in foreground for account linking.
-  # Trap SIGINT so Ctrl-C only kills dropboxd, not this script.
-  trap '' INT
-  "${HOME}/.dropbox-dist/dropboxd" &
+  # Run dropboxd in a subshell, piping output so we can detect the
+  # "linked" message and stop it automatically (no Ctrl-C needed).
+  LINK_LOG=$(mktemp /tmp/dropbox-link.XXXXXX)
+  "${HOME}/.dropbox-dist/dropboxd" > "${LINK_LOG}" 2>&1 &
   DBPID=$!
-  trap "kill $DBPID 2>/dev/null; wait $DBPID 2>/dev/null" INT
-  wait $DBPID 2>/dev/null || true
-  trap - INT
+
+  # Tail the log so the user can see the URL and status messages
+  tail -f "${LINK_LOG}" &
+  TAILPID=$!
+
+  # Wait for the "linked to Dropbox" message (timeout after 5 minutes)
+  LINK_TIMEOUT=300
+  LINK_START=$(date +%s)
+  LINKED=false
+  while true; do
+    ELAPSED=$(( $(date +%s) - LINK_START ))
+    if [[ $ELAPSED -ge $LINK_TIMEOUT ]]; then
+      break
+    fi
+    if grep -q "linked to Dropbox" "${LINK_LOG}" 2>/dev/null; then
+      LINKED=true
+      sleep 2  # let any final output appear
+      break
+    fi
+    sleep 1
+  done
+
+  # Stop the tail and dropboxd
+  kill $TAILPID 2>/dev/null; wait $TAILPID 2>/dev/null || true
+  kill $DBPID 2>/dev/null; wait $DBPID 2>/dev/null || true
+  rm -f "${LINK_LOG}"
+
+  if [[ "${LINKED}" != "true" ]]; then
+    err "Dropbox linking timed out after ${LINK_TIMEOUT}s."
+    echo "  Try running ~/setup-dropbox.sh again."
+    exit 1
+  fi
+
+  log "Account linked successfully."
 
   echo ""
   log "Enabling and starting Dropbox service..."
