@@ -5,14 +5,15 @@
 # Run this AFTER the main setup.sh, as the ubuntu user (not root).
 #
 # This script configures MCP servers so that Claude Code can access:
-#   - ActingWeb Personal AI Memory (required — via mcporter + OAuth PKCE)
-#   - Gmail (optional — via headless MCP server + Google OAuth tokens)
-#   - Google Calendar (optional — via headless MCP server + Google OAuth tokens)
+#   - ActingWeb Personal AI Memory (required — remote MCP with OAuth)
+#   - Gmail (optional — Anthropic hosted connector + Google sign-in)
+#   - Google Calendar (optional — Anthropic hosted connector + Google sign-in)
+#
+# All servers use Claude Code's built-in OAuth support. No external
+# dependencies (mcporter, npm, Node.js) are needed.
 #
 # Prerequisites:
 #   - Claude Code installed
-#   - Node.js installed
-#   - mcporter installed (npm install -g mcporter)
 #   - agent.conf available (for SETUP_* flags)
 #
 # Usage:
@@ -50,7 +51,7 @@ echo "============================================================"
 echo ""
 
 # =============================================================================
-# 1. ActingWeb Personal AI Memory (via mcporter)
+# 1. ActingWeb Personal AI Memory (remote MCP with OAuth)
 # =============================================================================
 if [[ "$FILTER" == "all" || "$FILTER" == "--actingweb" ]]; then
 
@@ -59,10 +60,8 @@ echo ""
 echo "ActingWeb provides cross-session memory that persists across all your"
 echo "AI tools (Claude Code, Cowork, ChatGPT, etc.)."
 echo ""
-echo "This will:"
-echo "  1. Register the ActingWeb MCP server with mcporter"
-echo "  2. Run the OAuth flow (you'll open a URL in your browser)"
-echo "  3. Configure Claude Code to use mcporter as a proxy"
+echo "This will register the ActingWeb remote MCP server with Claude Code."
+echo "Authentication is handled via OAuth when you first use it."
 echo ""
 
 SHOULD_SETUP_AW="${SETUP_ACTINGWEB}"
@@ -72,90 +71,11 @@ if [[ "$FILTER" != "--actingweb" && "$SETUP_ACTINGWEB" != "true" ]]; then
 fi
 
 if [[ "$SHOULD_SETUP_AW" == "true" ]]; then
-  # Check mcporter is installed
-  if ! command -v mcporter &> /dev/null; then
-    err "mcporter not found. Install with: npm install -g mcporter"
-    exit 1
-  fi
-
-  # Register the ActingWeb server
-  log "Registering ActingWeb MCP server with mcporter..."
-  mcporter config add actingweb https://ai.actingweb.io/mcp --auth oauth 2>/dev/null || \
-    warn "Already registered (continuing)"
-
-  # Try browser auth first
-  log "Attempting OAuth authentication..."
-  echo ""
-
-  if mcporter auth actingweb 2>/dev/null; then
-    log "Authentication succeeded!"
-  else
-    warn "Browser auth failed (expected on headless server)."
-    echo ""
-    echo "Using manual OAuth flow."
-    echo ""
-    echo "------------------------------------------------------------"
-    echo "IMPORTANT: The OAuth callback needs to reach this server."
-    echo ""
-    echo "Open a NEW terminal on your local machine and run:"
-    echo ""
-    echo "  ssh -L 18850:127.0.0.1:18850 agent"
-    echo ""
-    echo "This forwards port 18850 so the browser callback works."
-    echo "------------------------------------------------------------"
-    echo ""
-    read -r -p "Press Enter when SSH tunnel is ready..."
-
-    # Look for manual-oauth.sh in multiple locations
-    OAUTH_SCRIPT=""
-    BRAIN_FOLDER="${BRAIN_FOLDER:-brain}"
-    for CANDIDATE in \
-      "${HOME}/Dropbox/${BRAIN_FOLDER}/.claude/skills/managing-actingweb-memory/scripts/manual-oauth.sh" \
-      "${HOME}/pending-templates/manual-oauth.sh" \
-      "./manual-oauth.sh"; do
-      if [[ -f "$CANDIDATE" ]]; then
-        OAUTH_SCRIPT="$CANDIDATE"
-        break
-      fi
-    done
-
-    if [[ -n "$OAUTH_SCRIPT" ]]; then
-      log "Found manual-oauth.sh at: ${OAUTH_SCRIPT}"
-      log "Running manual OAuth flow..."
-      echo ""
-      bash "$OAUTH_SCRIPT"
-    else
-      warn "manual-oauth.sh not found."
-      echo ""
-      echo "Run the OAuth flow manually:"
-      echo "  1. mcporter auth actingweb --log-level debug"
-      echo "  2. Copy the 'visit https://...' URL from the output"
-      echo "  3. Open that URL in your browser (with SSH tunnel active)"
-      echo "  4. Complete Google sign-in"
-      echo ""
-      read -r -p "Try mcporter auth with debug output? (y/n): " TRY_DEBUG
-      if [[ "$TRY_DEBUG" == "y" ]]; then
-        mcporter auth actingweb --log-level debug
-      fi
-    fi
-  fi
-
-  # Verify mcporter connection
-  echo ""
-  log "Verifying ActingWeb connection..."
-  if mcporter list actingweb --schema 2>/dev/null | head -5; then
-    log "ActingWeb verified — tools available via mcporter."
-  else
-    warn "Could not verify. You may need to re-run authentication."
-  fi
-
-  # Configure Claude Code to use mcporter as the MCP transport
-  log "Adding ActingWeb to Claude Code (via mcporter)..."
-  claude mcp add actingweb \
-    -- mcporter run actingweb 2>/dev/null || {
-    warn "claude mcp add failed. Adding manually to ~/.claude.json..."
+  log "Adding ActingWeb MCP server (remote HTTP with OAuth)..."
+  claude mcp add-json actingweb '{"type":"http","url":"https://ai.actingweb.io/mcp","oauth":{"callbackPort":18850}}' 2>/dev/null || {
+    warn "claude mcp add-json failed. Adding manually to ~/.claude.json..."
     python3 << 'PYEOF'
-import json, os, shutil
+import json, os
 
 config_path = os.path.expanduser("~/.claude.json")
 try:
@@ -167,12 +87,10 @@ except (FileNotFoundError, json.JSONDecodeError):
 if "mcpServers" not in config:
     config["mcpServers"] = {}
 
-mcporter_path = shutil.which("mcporter") or "mcporter"
-
 config["mcpServers"]["actingweb"] = {
-    "type": "stdio",
-    "command": mcporter_path,
-    "args": ["run", "actingweb"]
+    "type": "http",
+    "url": "https://ai.actingweb.io/mcp",
+    "oauth": {"callbackPort": 18850}
 }
 
 with open(config_path, "w") as f:
@@ -187,7 +105,7 @@ fi
 fi # end actingweb
 
 # =============================================================================
-# 2. Gmail + Google Calendar
+# 2. Gmail + Google Calendar (Anthropic hosted connectors)
 # =============================================================================
 if [[ "$FILTER" == "all" || "$FILTER" == "--google" ]]; then
 
@@ -202,64 +120,17 @@ if [[ "$WANT_GOOGLE" == "true" ]]; then
 
 echo "--- Gmail + Google Calendar MCP Servers ---"
 echo ""
-echo "These require Google OAuth credentials."
+echo "These use Anthropic's official hosted connectors."
+echo "No Google Cloud project or OAuth credentials needed — authentication"
+echo "is handled via interactive Google sign-in through Claude Code."
 echo ""
-echo "To get them:"
-echo "  1. Go to https://console.cloud.google.com"
-echo "  2. Create a project (or use existing)"
-echo "  3. Enable APIs: Gmail API, Google Calendar API"
-echo "  4. Create OAuth 2.0 credentials -> 'Desktop app' type"
-echo "  5. Get a refresh token via the OAuth Playground:"
-echo ""
-echo "     https://developers.google.com/oauthplayground/"
-echo ""
-echo "     -> Click the gear icon -> check 'Use your own OAuth credentials'"
-echo "     -> Paste your Client ID and Client Secret"
-echo "     -> In Step 1, select these scopes:"
-echo "         Gmail API v1: .../gmail.readonly, .../gmail.compose, .../gmail.modify"
-echo "         Calendar API v3: .../calendar, .../calendar.events"
-echo "     -> Authorize APIs -> Exchange code for tokens"
-echo "     -> Copy the Refresh Token"
-echo ""
-
-# Use credentials from agent.conf if present
-GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID:-}"
-GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET:-}"
-GOOGLE_REFRESH_TOKEN="${GOOGLE_REFRESH_TOKEN:-}"
-
-if [[ -z "$GOOGLE_CLIENT_ID" ]]; then
-  read -r -p "Google Client ID: " GOOGLE_CLIENT_ID
-fi
-if [[ -z "$GOOGLE_CLIENT_SECRET" ]]; then
-  read -r -s -p "Google Client Secret: " GOOGLE_CLIENT_SECRET
-  echo ""
-fi
-if [[ -z "$GOOGLE_REFRESH_TOKEN" ]]; then
-  read -r -s -p "Google Refresh Token: " GOOGLE_REFRESH_TOKEN
-  echo ""
-fi
-
-# Store credentials securely
-cat > "${HOME}/.mcp-google-credentials" << EOF
-# Google OAuth credentials for MCP servers
-# Generated by setup-mcp.sh on $(date)
-GOOGLE_CLIENT_ID=${GOOGLE_CLIENT_ID}
-GOOGLE_CLIENT_SECRET=${GOOGLE_CLIENT_SECRET}
-GOOGLE_REFRESH_TOKEN=${GOOGLE_REFRESH_TOKEN}
-EOF
-chmod 600 "${HOME}/.mcp-google-credentials"
-log "Google credentials saved to ~/.mcp-google-credentials"
 
 # --- Gmail ---
 if [[ "$SETUP_GMAIL" == "true" || "$FILTER" == "--google" ]]; then
-  log "Adding Gmail MCP server to Claude Code..."
-  claude mcp add gmail \
-    -e GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}" \
-    -e GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET}" \
-    -e GOOGLE_REFRESH_TOKEN="${GOOGLE_REFRESH_TOKEN}" \
-    -- npx @peakmojo/mcp-server-headless-gmail 2>/dev/null || {
-    warn "claude mcp add failed for Gmail. Adding manually..."
-    python3 << PYEOF
+  log "Adding Gmail MCP server (Anthropic hosted connector)..."
+  claude mcp add-json gmail '{"type":"http","url":"https://gmail.mcp.claude.com/mcp","oauth":{"callbackPort":18851}}' 2>/dev/null || {
+    warn "claude mcp add-json failed for Gmail. Adding manually..."
+    python3 << 'PYEOF'
 import json, os
 config_path = os.path.expanduser("~/.claude.json")
 try:
@@ -270,14 +141,9 @@ except (FileNotFoundError, json.JSONDecodeError):
 if "mcpServers" not in config:
     config["mcpServers"] = {}
 config["mcpServers"]["gmail"] = {
-    "type": "stdio",
-    "command": "npx",
-    "args": ["@peakmojo/mcp-server-headless-gmail"],
-    "env": {
-        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
-        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
-        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
-    }
+    "type": "http",
+    "url": "https://gmail.mcp.claude.com/mcp",
+    "oauth": {"callbackPort": 18851}
 }
 with open(config_path, "w") as f:
     json.dump(config, f, indent=2)
@@ -289,14 +155,10 @@ fi
 
 # --- Google Calendar ---
 if [[ "$SETUP_GOOGLE_CALENDAR" == "true" || "$FILTER" == "--google" ]]; then
-  log "Adding Google Calendar MCP server to Claude Code..."
-  claude mcp add google-calendar \
-    -e GOOGLE_CLIENT_ID="${GOOGLE_CLIENT_ID}" \
-    -e GOOGLE_CLIENT_SECRET="${GOOGLE_CLIENT_SECRET}" \
-    -e GOOGLE_REFRESH_TOKEN="${GOOGLE_REFRESH_TOKEN}" \
-    -- npx @anthropic/mcp-server-google-calendar 2>/dev/null || {
-    warn "claude mcp add failed for Calendar. Adding manually..."
-    python3 << PYEOF
+  log "Adding Google Calendar MCP server (Anthropic hosted connector)..."
+  claude mcp add-json google-calendar '{"type":"http","url":"https://gcal.mcp.claude.com/mcp","oauth":{"callbackPort":18852}}' 2>/dev/null || {
+    warn "claude mcp add-json failed for Calendar. Adding manually..."
+    python3 << 'PYEOF'
 import json, os
 config_path = os.path.expanduser("~/.claude.json")
 try:
@@ -307,14 +169,9 @@ except (FileNotFoundError, json.JSONDecodeError):
 if "mcpServers" not in config:
     config["mcpServers"] = {}
 config["mcpServers"]["google-calendar"] = {
-    "type": "stdio",
-    "command": "npx",
-    "args": ["@anthropic/mcp-server-google-calendar"],
-    "env": {
-        "GOOGLE_CLIENT_ID": "${GOOGLE_CLIENT_ID}",
-        "GOOGLE_CLIENT_SECRET": "${GOOGLE_CLIENT_SECRET}",
-        "GOOGLE_REFRESH_TOKEN": "${GOOGLE_REFRESH_TOKEN}"
-    }
+    "type": "http",
+    "url": "https://gcal.mcp.claude.com/mcp",
+    "oauth": {"callbackPort": 18852}
 }
 with open(config_path, "w") as f:
     json.dump(config, f, indent=2)
@@ -325,17 +182,45 @@ PYEOF
 fi
 
 echo ""
+
 fi # end want_google
 
 fi # end google
 
 # =============================================================================
-# 3. Verify
+# 3. Authenticate and Verify
 # =============================================================================
 echo ""
 echo "============================================================"
 echo " MCP Configuration Summary"
 echo "============================================================"
+echo ""
+echo "------------------------------------------------------------"
+echo "IMPORTANT: Authenticate MCP servers"
+echo ""
+echo "The MCP servers are registered but need OAuth authentication."
+echo ""
+echo "On a local machine:"
+echo "  claude"
+echo "  /mcp    # select a server, then Authenticate — browser opens"
+echo ""
+echo "On a headless server (EC2), use SSH tunneling:"
+echo ""
+echo "  1. Open a NEW terminal on your local machine and run:"
+echo ""
+echo "     ssh -L 18850:127.0.0.1:18850 -L 18851:127.0.0.1:18851 -L 18852:127.0.0.1:18852 agent"
+echo ""
+echo "  2. In that session, run:"
+echo "     claude"
+echo "     /mcp    # select a server, then Authenticate"
+echo ""
+echo "  3. A browser opens on your local machine for sign-in."
+echo "     After sign-in, the callback reaches the server via"
+echo "     the SSH tunnel. Repeat /mcp for each server."
+echo ""
+echo "Each server only needs to be authenticated once — tokens"
+echo "are refreshed automatically."
+echo "------------------------------------------------------------"
 echo ""
 
 if command -v claude &> /dev/null; then
@@ -367,13 +252,7 @@ echo "  claude mcp remove <name>           # remove broken one"
 echo "  ./setup-mcp.sh --actingweb         # reconfigure ActingWeb"
 echo "  ./setup-mcp.sh --google            # reconfigure Google"
 echo ""
-echo "Credentials:"
-echo "  ~/.mcporter/credentials.json       ActingWeb tokens (auto-managed by mcporter)"
-echo "  ~/.mcp-google-credentials          Google OAuth (chmod 600)"
-echo ""
 echo "Token refresh:"
-echo "  ActingWeb: auto-refreshes via mcporter"
-echo "  Google: tokens may expire after 6 months of inactivity."
-echo "          Regenerate via OAuth Playground and re-run:"
-echo "          ./setup-mcp.sh --google"
+echo "  All MCP servers use Claude Code's built-in OAuth with auto-refresh."
+echo "  If auth expires, re-authenticate with /mcp in Claude Code."
 echo "============================================================"

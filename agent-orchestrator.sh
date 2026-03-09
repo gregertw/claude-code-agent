@@ -191,18 +191,13 @@ echo ""
 
 cd "${BRAIN_DIR}"
 
-# Build MCP config path and allowed tools list
-MCP_CONFIG_ARGS=""
+# Build allowed MCP tools list from Claude Code's config
 ALLOWED_MCP_TOOLS=""
-
-# Check for MCP config file (created by deploy.sh or setup-mcp.sh)
-MCP_CONFIG_FILE="${HOME_DIR}/.agent-mcp-config.json"
-if [[ -f "${MCP_CONFIG_FILE}" ]]; then
-  MCP_CONFIG_ARGS="--mcp-config ${MCP_CONFIG_FILE}"
-  # Extract MCP server names and build allowed tools list
+CLAUDE_CONFIG="${HOME_DIR}/.claude.json"
+if [[ -f "${CLAUDE_CONFIG}" ]]; then
   MCP_SERVERS=$(python3 -c "
 import json
-with open('${MCP_CONFIG_FILE}') as f:
+with open('${CLAUDE_CONFIG}') as f:
     d = json.load(f)
 for name in d.get('mcpServers', {}):
     print(f'mcp__{name}')
@@ -217,7 +212,6 @@ fi
 claude -p "${MASTER_PROMPT}" \
   --output-format text \
   --max-turns 50 \
-  ${MCP_CONFIG_ARGS} \
   ${ALLOWED_MCP_TOOLS} \
   2>&1 | tee "${RUN_LOG}"
 

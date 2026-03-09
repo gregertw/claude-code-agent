@@ -2,20 +2,18 @@
 # =============================================================================
 # Deploy Agent Server — Run from your LOCAL machine
 # =============================================================================
-# One command to create all AWS resources, configure the server, set up
-# MCP connections (with local OAuth), and optionally deploy the scheduler.
+# Creates all AWS resources, configures the server, and registers MCP servers.
+# After this script completes, follow the guided post-deploy steps to:
+#   - Link Dropbox (if using)
+#   - Authenticate Claude Code (API key or account login)
+#   - Authenticate MCP servers (ActingWeb, Gmail, Calendar)
 #
 # Prerequisites:
-#   - AWS CLI installed and configured
+#   - AWS CLI installed and configured (`aws configure`)
 #   - agent.conf in the same directory (copy from agent.conf.example)
-#   - An Anthropic API key
-#   - ActingWeb (for cross-session memory — account auto-created on first /mcp auth)
-#   - Node.js + npm locally (for mcporter OAuth flow)
 #
 # Usage:
-#   export ANTHROPIC_API_KEY="sk-ant-..."   # set before running to skip prompt
-#   ./deploy.sh                    # interactive — prompts for missing values
-#   ./deploy.sh --skip-mcp         # skip MCP/OAuth setup (do it later)
+#   ./deploy.sh                    # full deploy
 #   ./deploy.sh --skip-scheduler   # skip EventBridge scheduler setup
 #
 # State is saved to deploy-state.json for teardown.sh to use.
@@ -39,14 +37,12 @@ err()  { echo -e "${RED}[ERROR]${NC} $1"; }
 step() { echo -e "\n${GREEN}--- Step $1: $2 ---${NC}"; }
 
 # --- Parse flags -------------------------------------------------------------
-SKIP_MCP=false
 SKIP_SCHEDULER=false
 for arg in "$@"; do
   case "$arg" in
-    --skip-mcp) SKIP_MCP=true ;;
     --skip-scheduler) SKIP_SCHEDULER=true ;;
     --help|-h)
-      echo "Usage: ./deploy.sh [--skip-mcp] [--skip-scheduler]"
+      echo "Usage: ./deploy.sh [--skip-scheduler]"
       exit 0 ;;
   esac
 done
@@ -67,6 +63,7 @@ AWS_REGION="${AWS_REGION:-eu-north-1}"
 SCHEDULE_MODE="${SCHEDULE_MODE:-always-on}"
 SCHEDULE_INTERVAL="${SCHEDULE_INTERVAL:-60}"
 INSTALL_TTYD="${INSTALL_TTYD:-false}"
+FILE_SYNC="${FILE_SYNC:-dropbox}"
 KEY_NAME="agent-server-key"
 SG_NAME="agent-server-sg"
 INSTANCE_NAME="agent-server"
@@ -90,18 +87,12 @@ if ! aws sts get-caller-identity &>/dev/null; then
 fi
 
 log "Deploying agent server for ${OWNER_NAME}"
-log "Region: ${AWS_REGION} | Mode: ${SCHEDULE_MODE}"
+log "Region: ${AWS_REGION} | Mode: ${SCHEDULE_MODE} | File sync: ${FILE_SYNC}"
 echo ""
 
-# --- Prompt for API key ------------------------------------------------------
-if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  echo -n "Anthropic API key (from console.anthropic.com): "
-  read -r -s ANTHROPIC_API_KEY
-  echo ""
-  if [[ -z "${ANTHROPIC_API_KEY}" ]]; then
-    err "API key is required."
-    exit 1
-  fi
+# --- Optional: set API key early if provided --------------------------------
+if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  log "API key found in environment — will configure on server."
 fi
 
 # =============================================================================
@@ -167,7 +158,7 @@ RULES="${RULES}]"
 aws ec2 authorize-security-group-ingress \
   --group-id "${SG_ID}" \
   --region "${AWS_REGION}" \
-  --ip-permissions "${RULES}" 2>/dev/null || warn "Ingress rules may already exist (continuing)"
+  --ip-permissions "${RULES}" >/dev/null 2>/dev/null || warn "Ingress rules may already exist (continuing)"
 
 # =============================================================================
 step 3 "Find Ubuntu 24.04 AMI"
@@ -319,192 +310,30 @@ fi
 log "Server setup complete."
 
 # =============================================================================
-step 9 "Set API Key and Verify"
+step 9 "Set API Key (if provided)"
 # =============================================================================
-ssh "${SSH_HOST}" "echo 'export ANTHROPIC_API_KEY=\"${ANTHROPIC_API_KEY}\"' > ~/.agent-env && chmod 600 ~/.agent-env"
-log "API key configured."
-
-CLAUDE_VERSION=$(ssh "${SSH_HOST}" "source ~/.agent-env && export PATH=\"\$HOME/.local/bin:\$PATH\" && claude --version" 2>/dev/null)
-log "Claude Code ${CLAUDE_VERSION} verified."
-
-# =============================================================================
-step 10 "Configure MCP Connections"
-# =============================================================================
-if [[ "${SKIP_MCP}" == "true" ]]; then
-  warn "Skipping MCP setup (--skip-mcp). Run setup-mcp.sh on the server later."
+if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  ssh "${SSH_HOST}" "echo 'export ANTHROPIC_API_KEY=\"${ANTHROPIC_API_KEY}\"' > ~/.agent-env && chmod 600 ~/.agent-env"
+  log "API key configured on server."
 else
-  # --- ActingWeb OAuth (run locally, copy tokens to server) ---
-  if [[ "${SETUP_ACTINGWEB:-true}" == "true" ]]; then
-    log "Setting up ActingWeb MCP (OAuth runs in your local browser)..."
-
-    # Ensure mcporter is available locally
-    if ! command -v mcporter &>/dev/null; then
-      log "Installing mcporter locally..."
-      npm install -g mcporter 2>/dev/null
-    fi
-
-    # Configure mcporter locally (use a temp config to avoid polluting project)
-    MCPORTER_TMP=$(mktemp -d)
-    MCPORTER_CONFIG="${MCPORTER_TMP}/mcporter.json"
-    cat > "${MCPORTER_CONFIG}" << 'MCPEOF'
-{"mcpServers":{},"imports":[]}
-MCPEOF
-
-    mcporter config add actingweb https://ai.actingweb.io/mcp \
-      --auth oauth --scope home \
-      --persist "${MCPORTER_CONFIG}" 2>/dev/null || true
-
-    echo ""
-    echo "============================================================"
-    echo "  ACTION REQUIRED: Browser sign-in"
-    echo ""
-    echo "  A browser window will open for ActingWeb OAuth sign-in."
-    echo "  Please switch to your browser and complete the sign-in"
-    echo "  when it appears."
-    echo "============================================================"
-    echo ""
-    read -r -p "Press Enter to open the browser..."
-
-    # Run mcporter auth locally (browser opens automatically)
-    if mcporter auth actingweb --config "${MCPORTER_CONFIG}" --oauth-timeout 120000 2>/dev/null; then
-      log "ActingWeb OAuth succeeded!"
-    else
-      # mcporter may crash but still save credentials — check
-      if [[ -f "${HOME}/.mcporter/credentials.json" ]]; then
-        if grep -q "tokens" "${HOME}/.mcporter/credentials.json" 2>/dev/null; then
-          log "ActingWeb tokens found in credentials."
-        else
-          warn "OAuth may not have completed. Falling back to manual flow..."
-          echo ""
-          echo "The automated OAuth flow didn't complete cleanly."
-          echo "We'll try a manual approach: capture the auth code and exchange tokens."
-          echo ""
-
-          # Read the registered client info
-          CLIENT_ID=$(python3 -c "import json; d=json.load(open('${HOME}/.mcporter/credentials.json')); e=list(d['entries'].values())[0]; print(e['clientInfo']['client_id'])")
-          CLIENT_SECRET=$(python3 -c "import json; d=json.load(open('${HOME}/.mcporter/credentials.json')); e=list(d['entries'].values())[0]; print(e['clientInfo']['client_secret'])")
-          REDIRECT_PORT=$(python3 -c "import json,re; d=json.load(open('${HOME}/.mcporter/credentials.json')); e=list(d['entries'].values())[0]; m=re.search(r':(\d+)/', e['clientInfo']['redirect_uris'][0]); print(m.group(1))")
-          REDIRECT_URI="http://127.0.0.1:${REDIRECT_PORT}/callback"
-          CODE_VERIFIER=$(python3 -c "import json; d=json.load(open('${HOME}/.mcporter/credentials.json')); e=list(d['entries'].values())[0]; print(e['codeVerifier'])")
-          STATE=$(python3 -c "import json; d=json.load(open('${HOME}/.mcporter/credentials.json')); e=list(d['entries'].values())[0]; print(e['state'])")
-          CODE_CHALLENGE=$(echo -n "${CODE_VERIFIER}" | openssl dgst -sha256 -binary | openssl base64 -A | tr '+/' '-_' | tr -d '=')
-
-          ENCODED_REDIRECT=$(python3 -c "import urllib.parse; print(urllib.parse.quote('${REDIRECT_URI}', safe=''))")
-          AUTH_URL="https://ai.actingweb.io/oauth/authorize?response_type=code&client_id=${CLIENT_ID}&code_challenge=${CODE_CHALLENGE}&code_challenge_method=S256&redirect_uri=${ENCODED_REDIRECT}&state=${STATE}&scope=mcp&resource=https%3A%2F%2Fai.actingweb.io%2Fmcp"
-
-          # Start a local callback server
-          CALLBACK_CODE_FILE=$(mktemp)
-          python3 -c "
-import http.server, urllib.parse, threading, sys
-class H(http.server.BaseHTTPRequestHandler):
-    def do_GET(self):
-        params = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
-        if 'code' in params:
-            with open('${CALLBACK_CODE_FILE}', 'w') as f: f.write(params['code'][0])
-            self.send_response(200); self.send_header('Content-Type','text/html'); self.end_headers()
-            self.wfile.write(b'<h1>Authorization successful!</h1><p>You can close this tab.</p>')
-            threading.Thread(target=self.server.shutdown).start()
-        else:
-            self.send_response(400); self.end_headers(); self.wfile.write(b'No code')
-    def log_message(self, *a): pass
-http.server.HTTPServer(('127.0.0.1', ${REDIRECT_PORT}), H).serve_forever()
-" &
-          CALLBACK_PID=$!
-          sleep 1
-
-          # Open browser
-          echo "============================================================"
-          echo "  ACTION REQUIRED: Complete sign-in in your browser."
-          echo "============================================================"
-          echo ""
-          open "${AUTH_URL}" 2>/dev/null || xdg-open "${AUTH_URL}" 2>/dev/null || {
-            echo "Open this URL in your browser:"
-            echo "  ${AUTH_URL}"
-          }
-
-          echo "Waiting for OAuth callback (up to 2 minutes)..."
-          for i in $(seq 1 120); do
-            if [[ -s "${CALLBACK_CODE_FILE}" ]]; then
-              break
-            fi
-            sleep 1
-          done
-          kill ${CALLBACK_PID} 2>/dev/null || true
-
-          if [[ -s "${CALLBACK_CODE_FILE}" ]]; then
-            AUTH_CODE=$(cat "${CALLBACK_CODE_FILE}")
-            log "Got authorization code. Exchanging for tokens..."
-
-            TOKENS=$(curl -s -X POST "https://ai.actingweb.io/oauth/token" \
-              -H "Content-Type: application/x-www-form-urlencoded" \
-              -d "grant_type=authorization_code&code=${AUTH_CODE}&redirect_uri=${REDIRECT_URI}&client_id=${CLIENT_ID}&client_secret=${CLIENT_SECRET}&code_verifier=${CODE_VERIFIER}")
-
-            if echo "${TOKENS}" | python3 -c "import json,sys; d=json.load(sys.stdin); assert 'access_token' in d" 2>/dev/null; then
-              log "Tokens received!"
-
-              # Inject tokens into credentials file
-              python3 -c "
-import json
-creds = json.load(open('${HOME}/.mcporter/credentials.json'))
-tokens = json.loads('''${TOKENS}''')
-entry = list(creds['entries'].values())[0]
-entry['tokens'] = {
-    'access_token': tokens['access_token'],
-    'token_type': tokens.get('token_type', 'Bearer'),
-    'expires_in': tokens.get('expires_in', 3600),
-    'refresh_token': tokens.get('refresh_token', ''),
-    'scope': tokens.get('scope', 'mcp')
-}
-json.dump(creds, open('${HOME}/.mcporter/credentials.json', 'w'), indent=2)
-"
-              log "Credentials updated."
-            else
-              warn "Token exchange failed. You'll need to run setup-mcp.sh on the server later."
-              echo "  Response: ${TOKENS}"
-            fi
-          else
-            warn "OAuth callback timed out. Run setup-mcp.sh on the server later."
-          fi
-          rm -f "${CALLBACK_CODE_FILE}"
-        fi
-      else
-        warn "No credentials saved. You'll need to run setup-mcp.sh on the server later."
-      fi
-    fi
-
-    # Copy tokens to server and configure MCP as direct HTTP connection
-    if [[ -f "${HOME}/.mcporter/credentials.json" ]] && grep -q "tokens\|access_token" "${HOME}/.mcporter/credentials.json" 2>/dev/null; then
-      # Extract access token from mcporter credentials
-      AW_ACCESS_TOKEN=$(python3 -c "
-import json
-d = json.load(open('${HOME}/.mcporter/credentials.json'))
-e = list(d['entries'].values())[0]
-print(e['tokens']['access_token'])
-")
-
-      # Write MCP config file for the orchestrator (direct HTTP, no mcporter needed)
-      ssh "${SSH_HOST}" "cat > ~/.agent-mcp-config.json" << MCPCONF
-{
-  "mcpServers": {
-    "actingweb": {
-      "type": "http",
-      "url": "https://ai.actingweb.io/mcp",
-      "headers": {
-        "Authorization": "Bearer ${AW_ACCESS_TOKEN}"
-      }
-    }
-  }
-}
-MCPCONF
-      ssh "${SSH_HOST}" "chmod 600 ~/.agent-mcp-config.json"
-
-      log "ActingWeb MCP configured on server (direct HTTP)."
-    fi
-
-    # Clean up local temp config
-    rm -rf "${MCPORTER_TMP}"
-  fi
+  ssh "${SSH_HOST}" "touch ~/.agent-env && chmod 600 ~/.agent-env"
+  log "No API key provided — will be configured during post-deploy setup."
 fi
+
+# Verify Claude Code is installed
+CLAUDE_VERSION=$(ssh "${SSH_HOST}" "export PATH=\"\$HOME/.local/bin:\$PATH\" && claude --version" 2>/dev/null || echo "unknown")
+log "Claude Code ${CLAUDE_VERSION} installed on server."
+
+# =============================================================================
+step 10 "Register MCP Servers"
+# =============================================================================
+log "Running setup-mcp.sh on server to register MCP servers..."
+ssh "${SSH_HOST}" "source ~/.agent-env 2>/dev/null; export PATH=\"\$HOME/.local/bin:\$PATH\"; chmod +x ~/setup-mcp.sh && ~/setup-mcp.sh" 2>&1 | while IFS= read -r line; do
+  if echo "$line" | grep -qE '\[(MCP|NOTE|ERROR)\]'; then
+    echo "$line"
+  fi
+done
+log "MCP servers registered (authentication needed in post-deploy)."
 
 # =============================================================================
 step 11 "Deploy EventBridge Scheduler"
@@ -526,25 +355,55 @@ else
 fi
 
 # =============================================================================
-# Done
+# Done — Print status summary
 # =============================================================================
-echo ""
-echo "============================================================"
-echo -e "${GREEN} DEPLOYMENT COMPLETE ${NC}"
-echo "============================================================"
-echo ""
-echo "Instance:    ${INSTANCE_ID}"
-echo "Elastic IP:  ${ELASTIC_IP}"
-echo "SSH:         ssh ${SSH_HOST}"
-if [[ "${INSTALL_TTYD}" == "true" ]]; then
-  echo "Web terminal: https://${ELASTIC_IP} (self-signed cert)"
+
+# Build list of post-deploy steps needed
+POST_STEPS=""
+STEP_NUM=1
+
+if [[ "${FILE_SYNC}" == "dropbox" ]]; then
+  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Link Dropbox (~/setup-dropbox.sh)"
+  STEP_NUM=$((STEP_NUM + 1))
 fi
-echo "Mode:        ${SCHEDULE_MODE}"
+
+if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
+  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate Claude Code (API key or account login)"
+  STEP_NUM=$((STEP_NUM + 1))
+else
+  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Verify Claude Code authentication"
+  STEP_NUM=$((STEP_NUM + 1))
+fi
+
+POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate MCP servers (/mcp in Claude Code)"
+STEP_NUM=$((STEP_NUM + 1))
+
+POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Test the orchestrator"
+
 echo ""
-echo "State saved to: deploy-state.json"
-echo "To tear down:   ./teardown.sh"
+echo "============================================================"
 echo ""
-echo "Next steps:"
-echo "  ssh ${SSH_HOST}"
-echo "  ~/scripts/agent-orchestrator.sh --no-stop   # test run"
+echo "DEPLOY STATUS: SUCCESS"
+echo ""
+echo "Instance ID:  ${INSTANCE_ID}"
+echo "Elastic IP:   ${ELASTIC_IP}"
+echo "SSH command:  ssh ${SSH_HOST}"
+if [[ "${INSTALL_TTYD}" == "true" ]]; then
+  echo "Web terminal: https://${ELASTIC_IP}"
+fi
+echo "Region:       ${AWS_REGION}"
+echo "Mode:         ${SCHEDULE_MODE}"
+echo "File sync:    ${FILE_SYNC}"
+echo "Claude Code:  ${CLAUDE_VERSION}"
+if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  echo "API key:      configured"
+else
+  echo "API key:      not set (use login or set manually)"
+fi
+echo ""
+echo "Post-deploy steps needed:"
+echo -e "${POST_STEPS}"
+echo ""
+echo "To tear down: ./teardown.sh"
+echo ""
 echo "============================================================"

@@ -14,31 +14,29 @@ Create a cloud instance that runs the agent autonomously.
 ## Prerequisites
 
 - An AWS account
-- An Anthropic API key from [console.anthropic.com](https://console.anthropic.com)
-- An ActingWeb account (automatically created on first `/mcp` authentication)
 - AWS CLI installed and configured on your local machine (`aws configure`)
-- Node.js + npm installed locally (for mcporter OAuth)
+- **One of:**
+  - An Anthropic API key from [console.anthropic.com](https://console.anthropic.com), **or**
+  - A Claude Pro, Max, or Enterprise subscription (logged into Claude Code locally)
 - A Dropbox account (only if using Dropbox sync)
 
 ## Quick Deploy (recommended)
 
-The `deploy.sh` script automates the entire setup in one command: creates AWS
-resources (key pair, security group, EC2 instance, Elastic IP), uploads and runs
-the server setup, configures MCP connections with local OAuth, and deploys the
-EventBridge scheduler.
+The `deploy.sh` script creates all AWS infrastructure and configures the server.
+After it completes, you follow guided steps to link Dropbox (if using),
+authenticate Claude Code, and authenticate MCP servers.
 
 ```bash
 # 1. Configure
 cp agent.conf.example agent.conf
 nano agent.conf    # set OWNER_NAME, FILE_SYNC, SCHEDULE_MODE, etc.
 
-# 2. Deploy (prompts for API key, opens browser for OAuth)
-export ANTHROPIC_API_KEY="sk-ant-..."    # or let the script prompt you
+# 2. Deploy (optionally set API key — or log in on the server later)
+export ANTHROPIC_API_KEY="sk-ant-..."   # optional
 ./deploy.sh
 
-# 3. Test
-ssh agent
-~/scripts/agent-orchestrator.sh --no-stop
+# 3. Follow the post-deploy steps printed at the end
+#    (Dropbox linking, Claude Code auth, MCP auth, test run)
 ```
 
 To tear everything down: `./teardown.sh`
@@ -114,54 +112,74 @@ sudo ./setup.sh
 ### Step 5: Post-Setup (with Dropbox)
 
 ```bash
-# a) Set API key
-nano ~/.agent-env    # paste your ANTHROPIC_API_KEY
-source ~/.agent-env
-
-# b) Link Dropbox
-~/.dropbox-dist/dropboxd
-# -> Open the URL in browser, authorize, then Ctrl-C
-sudo systemctl start dropbox
-
-# c) Configure selective sync (optional)
-dropbox-cli exclude add ~/Dropbox/Photos
-dropbox-cli exclude list
-
-# d) Install template files (after Dropbox syncs)
-~/scripts/install-templates.sh
-
-# e) Verify Claude Code
-claude --version
-echo 'Reply: Hello' | claude -p
-
-# f) Configure MCP connections
-~/setup-mcp.sh
-
-# g) Test the orchestrator
-~/scripts/agent-orchestrator.sh --no-stop
+# a) Link Dropbox, configure selective sync, and install templates
+~/setup-dropbox.sh
 ```
 
-### Step 5: Post-Setup (without Dropbox)
+The `setup-dropbox.sh` script handles the full Dropbox setup in one go:
+
+1. **Links your account** — runs `dropboxd`, which prints a URL to open in your
+   browser. After authorizing, wait for "This computer is now linked to Dropbox."
+   then Ctrl-C.
+2. **Configures selective sync** — excludes everything from syncing except your
+   brain folder (`brain/` by default). This prevents the server from downloading
+   your entire Dropbox.
+3. **Creates the brain folder** if it doesn't exist yet in Dropbox.
+4. **Installs template files** into the brain directory.
+
+**What to expect from `dropboxd`:** The first run prints several `dropbox: load fq extension`
+lines and a deprecation warning — these are normal and can be ignored. It then prints a
+URL to visit. After you authorize in the browser, you'll see
+`This computer is now linked to Dropbox. Welcome <your name>`. It may then self-update
+(more `load fq extension` lines) and eventually print `Killed` as it restarts itself.
+Press Enter to get your shell prompt back, then Ctrl-C if the process is still running.
 
 ```bash
-# a) Set API key
-nano ~/.agent-env    # paste your ANTHROPIC_API_KEY
-source ~/.agent-env
-
-# b) Verify Claude Code
+# c) Verify Claude Code
 claude --version
 echo 'Reply: Hello' | claude -p
 
-# c) Configure MCP connections
+# d) Configure MCP connections
 ~/setup-mcp.sh
 
-# d) Test the orchestrator
-~/scripts/agent-orchestrator.sh --no-stop
+# e) Authenticate MCP servers (requires SSH tunnel — see below)
 ```
+
+### Step 6: Post-Setup (without Dropbox)
 
 Template files are installed automatically into `~/brain/` when not using Dropbox.
 
-### Step 6: Set Up Local SSH Config
+### Step 7: Authenticate Claude Code and MCP Servers
+
+Claude Code needs to be authenticated on first run (API key or account login).
+MCP servers need OAuth authentication. Since there's no browser on the
+server, use SSH port forwarding so the OAuth callback reaches the server
+from your local browser.
+
+```bash
+# On your LOCAL machine — SSH in with port forwarding:
+ssh -L 18850:127.0.0.1:18850 -L 18851:127.0.0.1:18851 -L 18852:127.0.0.1:18852 agent
+
+# Start Claude Code:
+claude
+# On first run, Claude Code asks for light/dark theme and then
+# authentication (API key or account login). Complete that first.
+
+# Then authenticate each MCP server:
+# /mcp → select server → Authenticate → browser opens for sign-in
+# Repeat for each server, then /exit
+```
+
+Port mapping: ActingWeb=18850, Gmail=18851, Calendar=18852
+
+#### Test the orchestrator
+
+```bash
+ssh agent
+~/scripts/agent-orchestrator.sh --no-stop
+```
+
+### Step 8: Set Up Local SSH Config
 
 Add to `~/.ssh/config` on your local machine:
 
@@ -235,6 +253,43 @@ When switching to always-on:
 
 ```bash
 ./deploy-scheduler.sh --remove
+```
+
+### Manual Wakeup
+
+In scheduled mode the instance is normally stopped between runs. To start it
+manually (e.g., to SSH in, run a task, or debug):
+
+```bash
+# From your LOCAL machine — start the instance
+aws ec2 start-instances --instance-ids <instance-id> --region <region>
+
+# Wait for it to be running
+aws ec2 wait instance-running --instance-ids <instance-id> --region <region>
+
+# SSH in
+ssh agent
+```
+
+Or use the AWS Console: EC2 → Instances → select `agent-server` → Instance
+state → Start instance.
+
+The instance will run the boot runner (agent-orchestrator.sh) automatically on
+start. To prevent it from self-stopping while you're working:
+
+```bash
+touch ~/agents/.keep-running      # prevents self-stop
+# ... do your work ...
+rm ~/agents/.keep-running         # re-enable self-stop
+```
+
+If you just want to trigger a one-off task run without keeping the instance
+alive, use the `agent` CLI:
+
+```bash
+ssh agent
+agent run                         # runs the full orchestrator
+agent run "Your custom prompt"    # runs a one-off task
 ```
 
 ---
@@ -328,6 +383,7 @@ Keep this directory in your Dropbox or backed up — it's the source of truth fo
 | `~/.agent-schedule` | Schedule mode config |
 | `~/.claude.json` | MCP server connections |
 | `~/.claude/settings.json` | Claude Code tool permissions |
+| `~/setup-dropbox.sh` | Link Dropbox, selective sync, install templates |
 | `~/scripts/agent-orchestrator.sh` | Orchestrator (copied from package) |
 | `~/scripts/run-agent.sh` | Run a one-off agent task with logging |
 | `~/scripts/set-schedule-mode.sh` | Toggle always-on / scheduled |

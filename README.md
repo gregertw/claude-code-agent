@@ -12,41 +12,158 @@ auto-fill templates, and do NOT execute steps without user confirmation.
 
 ### Step 1: Ask which setup option
 
-Ask the user which option they want before doing anything else:
+Ask the user which option they want before doing anything else.
+Mention that it is strongly suggested to start with Option A (Local Setup)
+first. Setting up an AWS hosted instance requires more technical insight,
+including an AWS account.
 
 - **Option A: Local Setup** — Brain directory on their machine, used via Claude
   Desktop Cowork. No cloud infrastructure. Best for trying things out.
 - **Option B: AWS EC2 Setup** — Cloud instance that runs autonomously on a
-  schedule. Best for unattended background processing. Requires AWS account
-  and Anthropic API key.
+  schedule. Best for unattended background processing.
 
 ### Step 2: Open the setup guide and follow it
 
 Based on their answer, open the corresponding guide:
 
 - Option A: `docs/local-setup.md` (in this repo, or fetch from GitHub)
-- Option B: `docs/aws-setup.md` (in this repo, or fetch from GitHub)
+- Option B: Follow the AWS guided setup below.
 
-**Follow the steps in that guide sequentially.** For each step:
+For Option A, follow the steps in `docs/local-setup.md` sequentially.
 
-1. Explain what the step does
-2. Ask for any required inputs (directory path, config values, etc.)
-3. Execute the step only after the user confirms
-4. For manual steps (AWS Console, browser OAuth), provide a clear walkthrough
+### AWS Guided Setup (Option B)
 
-### Step 3: Personalize (local setup only)
+Follow these steps **in order**, one at a time. Wait for the user to confirm
+each step before proceeding.
+
+#### B1: Check prerequisites
+
+Ask the user to confirm they have:
+
+- An **AWS account** with the **AWS CLI** installed and configured (`aws configure`)
+- **One of:**
+  - An Anthropic API key from console.anthropic.com, **or**
+  - A Claude Pro, Max, or Enterprise subscription (they will log in on the server)
+
+#### B2: Configure `agent.conf`
+
+Help the user create `agent.conf` from `agent.conf.example`. Ask them for:
+
+- `OWNER_NAME` — their name
+- `FILE_SYNC` — `"dropbox"` or `"none"`
+- `SCHEDULE_MODE` — `"always-on"` or `"scheduled"`
+- `AWS_REGION` — which AWS region (default: `eu-north-1`)
+- `INSTALL_TTYD` — want a web terminal? (`true`/`false`)
+- If ttyd: `TTYD_USER` and `TTYD_PASSWORD` (must not be `changeme`)
+- `SETUP_GMAIL` / `SETUP_GOOGLE_CALENDAR` — email/calendar integration?
+
+#### B3: Run deploy.sh
+
+If the user has an API key, tell them to set it first:
+```
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+Then tell them to run `./deploy.sh` and paste back the status output.
+
+The script is fully automated — it creates AWS resources, sets up the server,
+registers MCP servers, and deploys the scheduler. It takes a few minutes.
+
+#### B4: Review deploy status
+
+The user should paste the deploy status output back. Check it for:
+- `DEPLOY STATUS: SUCCESS`
+- Note the `Post-deploy steps needed` list
+
+Then guide the user through each remaining step below.
+
+#### B5: Link Dropbox (if FILE_SYNC="dropbox")
+
+Skip this step if not using Dropbox.
+
+Tell the user to run:
+```
+ssh agent
+~/setup-dropbox.sh
+```
+The script will:
+1. Start `dropboxd` and print a URL — tell them to open it in their browser
+2. After they see "This computer is now linked to Dropbox.", press Ctrl-C
+3. Configure selective sync (only the brain folder syncs)
+4. Install template files
+
+Expect noisy output (extension loading messages, deprecation warnings) — this
+is normal. After the script finishes, tell them to type `exit` to disconnect.
+
+#### B6: Authenticate Claude Code on the server
+
+Tell the user to SSH into the server with port forwarding for MCP OAuth:
+```
+ssh -L 18850:127.0.0.1:18850 -L 18851:127.0.0.1:18851 -L 18852:127.0.0.1:18852 agent
+```
+
+Then run Claude Code interactively:
+```
+claude
+```
+
+**First-run setup:** Claude Code will ask to choose light/dark theme, then
+ask to log in or enter an API key. Guide based on what the user chose:
+
+- **API key:** If they already set `ANTHROPIC_API_KEY` via deploy.sh, Claude
+  Code should pick it up automatically. If not, they can enter it now.
+- **Account login:** Claude Code will provide a URL to open in the browser.
+  Since SSH port forwarding is active, the callback will work.
+
+Confirm Claude Code is working before proceeding to MCP authentication.
+
+#### B7: Authenticate MCP servers
+
+Still in the same SSH session with Claude Code open, tell the user:
+```
+/mcp
+```
+Select each configured server and choose **Authenticate**. A browser window
+will open for OAuth sign-in. The SSH tunnel forwards the callback port so
+authentication completes on the server.
+
+Repeat for each MCP server (ActingWeb, Gmail, Calendar — whichever were
+configured). Port mapping: ActingWeb=18850, Gmail=18851, Calendar=18852.
+
+After all servers are authenticated, tell the user to type `/exit`.
+
+#### B8: Test the orchestrator
+
+Tell the user:
+```
+~/scripts/agent-orchestrator.sh --no-stop
+```
+This runs a full agent cycle without self-stopping. Check the output for
+errors. If everything works, the agent is ready.
+
+Tell the user to type `exit` to disconnect from the server.
+
+#### B9: Personalize (optional)
 
 The `personal.md` and `style.md` files are **templates with placeholders**.
-Do NOT fill them in yourself. Instead, follow Step 5 in the local setup guide
-which has a prompt that walks the user through filling them in interactively.
+Do NOT fill them in yourself. Instead, follow the personalization prompt
+in the setup guide which walks the user through filling them in interactively.
 
 ### Important rules
 
 - **Ask before acting.** Every step needs user input or confirmation.
 - **Do not auto-fill templates.** The personalization step exists for a reason.
 - **Follow the guide in order.** Do not skip or combine steps.
-- **If the repo is not local**, fetch files from
-  `https://github.com/gregertw/claude-code-agent` as needed.
+- **If the repo is not local**, the scripts (`deploy.sh`, `setup.sh`, etc.)
+  and template files need to exist in a local directory before setup can begin.
+  Ask the user where they want to put the files, then download and extract:
+  ```
+  curl -L https://github.com/gregertw/claude-code-agent/archive/refs/heads/main.zip -o /tmp/claude-code-agent.zip
+  unzip /tmp/claude-code-agent.zip -d <user-chosen-path>
+  rm /tmp/claude-code-agent.zip
+  ```
+  The extracted directory will be `<user-chosen-path>/claude-code-agent-main/`.
+  If running in Cowork, point Cowork to that directory ("Work in a folder")
+  after downloading.
 
 ---
 
@@ -55,21 +172,20 @@ which has a prompt that walks the user through filling them in interactively.
 Paste this into Claude Desktop Cowork or Claude Code:
 
 ```txt
-Follow the instructions at https://github.com/gregertw/claude-code-agent to
-set up an autonomous AI agent. Start with the README.md.
+Follow the instructions at https://github.com/gregertw/claude-code-agent
+to set up an autonomous AI agent. Start with the README.md.
 ```
 
-Or if you have the repo cloned locally:
-
-```txt
-Read README.md in this repo and help me set up the autonomous agent.
-```
+The AI will download the repo for you and guide you through setup step by step.
 
 ---
 
 ## Choose Your Setup
 
 **Pick one of these. Each has its own step-by-step guide.**
+
+> **Suggestion:** Start with Option A (Local Setup) first. Setting up an AWS
+> hosted instance requires more technical insight, including an AWS account.
 
 ### Option A: Local Setup (Claude Desktop / Cowork)
 
@@ -88,7 +204,8 @@ feature to work in that folder. No cloud infrastructure needed.
 Create a cloud instance that runs the agent autonomously on a schedule.
 
 - **Best for**: Unattended background processing, email triage, recurring tasks
-- **Cost**: ~$11–67/month depending on schedule
+- **Cost**: ~$11–67/month depending on schedule (plus API usage if using API key)
+- **Auth**: API key (usage-based) or account login (Pro/Max/Enterprise subscription)
 - **Runs unattended**: Yes — wakes on schedule, processes tasks, stops
 - **File access**: SSH, web terminal, or optional Dropbox sync
 
@@ -107,24 +224,31 @@ Create a cloud instance that runs the agent autonomously on a schedule.
 
 ---
 
-## Common Setup: ActingWeb and Google OAuth
+## Common Setup: MCP Connections
 
-Both options use ActingWeb for cross-session memory, and optionally Google OAuth
-for Gmail and Calendar access.
+Both options use remote MCP servers for memory and optional Google services.
+All three are standard remote MCP servers that use OAuth — just add the URL
+and sign in.
 
-### ActingWeb (required)
+### ActingWeb (required — cross-session memory)
 
-1. No sign-up needed — a new account is automatically created the first time you authenticate over `/mcp`
-2. Authentication is handled via OAuth during MCP setup (see your option's setup guide)
+- **URL**: `https://ai.actingweb.io/mcp`
+- No sign-up needed — account is auto-created on first authentication
+- **Claude Desktop / Cowork**: Add in Settings → Connectors
+- **Claude Code CLI**: `claude mcp add --transport http actingweb https://ai.actingweb.io/mcp`
 
-### Google OAuth (optional — for Gmail and Calendar)
+### Gmail and Google Calendar (optional)
 
-If you want email triage or calendar preview:
+These use Anthropic's official hosted connectors — no Google Cloud project or
+credentials needed.
 
-1. Go to [Google Cloud Console](https://console.cloud.google.com) → APIs & Services → Credentials
-2. Create OAuth 2.0 credentials (Desktop app type)
-3. Enable the Gmail API and Google Calendar API
-4. Note your `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_REFRESH_TOKEN`
+- **Gmail**: `https://gmail.mcp.claude.com/mcp`
+- **Google Calendar**: `https://gcal.mcp.claude.com/mcp`
+- **Claude Desktop / Cowork**: Add in Settings → Connectors
+- **Claude Code CLI**: `claude mcp add --transport http gmail https://gmail.mcp.claude.com/mcp`
+
+After adding, authenticate via OAuth (browser sign-in). On headless servers,
+Claude Code provides a URL to open manually — see your option's setup guide.
 
 ### Dropbox (optional — for file sync)
 
@@ -202,6 +326,7 @@ This works in both Option A and Option B.
 | `agent.conf.example` | Configuration template — copy to `agent.conf` (Option B) |
 | `agent-cli.sh` | Agent CLI helper — status, logs, run commands (Option B) |
 | `setup.sh` | Bootstrap script — run on fresh Ubuntu instance (Option B) |
+| `setup-dropbox.sh` | Link Dropbox, configure selective sync, install templates (Option B) |
 | `setup-mcp.sh` | Configure MCP connections on server (Option B) |
 | `agent-orchestrator.sh` | Main startup script — full task cycle (Option B) |
 | `deploy.sh` | One-command deploy — creates all AWS resources (Option B) |

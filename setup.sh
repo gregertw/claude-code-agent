@@ -229,7 +229,16 @@ EOF
 
   systemctl daemon-reload
   systemctl enable dropbox.service
+
+  # Copy Dropbox setup helper
+  if [[ -f "${SCRIPT_DIR}/setup-dropbox.sh" ]]; then
+    cp "${SCRIPT_DIR}/setup-dropbox.sh" "${HOME_DIR}/setup-dropbox.sh"
+    chmod +x "${HOME_DIR}/setup-dropbox.sh"
+    chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/setup-dropbox.sh"
+  fi
+
   log "Dropbox installed (not started — requires account linking)."
+  log "Run ~/setup-dropbox.sh to link, configure selective sync, and install templates."
 else
   log "File sync: none. Brain directory will be local at ${BRAIN_DIR}"
   # Create the local brain directory structure
@@ -265,7 +274,8 @@ if [[ "${INSTALL_TTYD}" == "true" ]]; then
 
     # Validate credentials
     if [[ "${TTYD_PASSWORD}" == "changeme" ]]; then
-      warn "TTYD_PASSWORD is still 'changeme'. Change it in agent.conf!"
+      err "TTYD_PASSWORD is still 'changeme'. Set a secure password in agent.conf before deploying."
+      exit 1
     fi
 
     # Generate self-signed TLS certificate for HTTPS
@@ -830,20 +840,8 @@ echo ""
 STEP=$((STEP + 1))
 
 if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  echo "${STEP}. LINK DROPBOX"
-  echo "   ~/.dropbox-dist/dropboxd"
-  echo "   -> Open the URL it prints in your browser"
-  echo "   -> After linking, Ctrl-C then: sudo systemctl start dropbox"
-  echo ""
-  STEP=$((STEP + 1))
-
-  echo "${STEP}. CONFIGURE DROPBOX SELECTIVE SYNC (optional)"
-  echo "   dropbox-cli exclude add ~/Dropbox/folder-you-dont-need"
-  echo ""
-  STEP=$((STEP + 1))
-
-  echo "${STEP}. INSTALL TEMPLATE FILES (after Dropbox syncs)"
-  echo "   ~/scripts/install-templates.sh"
+  echo "${STEP}. SET UP DROPBOX (link, selective sync, install templates)"
+  echo "   ~/setup-dropbox.sh"
   echo ""
   STEP=$((STEP + 1))
 else

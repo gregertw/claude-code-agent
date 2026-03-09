@@ -59,11 +59,14 @@ The agent will help you fill them in during your first session.
 
 ## Step 3: Set up MCP connections
 
-Add the following MCP servers in Claude Desktop's settings (Settings → MCP Servers):
+Add the following MCP servers in Claude Desktop's settings (Settings → Connectors → Add):
 
 - **ActingWeb** (required): `https://ai.actingweb.io/mcp` — account is auto-created on first auth
-- **Gmail** (optional) — requires Google OAuth credentials (see [README](../README.md#google-oauth-optional--for-gmail-and-calendar))
-- **Google Calendar** (optional) — requires Google OAuth credentials
+- **Gmail** (optional): `https://gmail.mcp.claude.com/mcp` — Anthropic hosted connector, signs in via Google
+- **Google Calendar** (optional): `https://gcal.mcp.claude.com/mcp` — Anthropic hosted connector, signs in via Google
+
+No Google Cloud project or OAuth credentials needed — just add the URL and
+complete the Google sign-in when prompted.
 
 ## Step 4: Open your brain folder in Cowork
 

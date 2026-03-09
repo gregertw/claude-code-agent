@@ -49,7 +49,7 @@ SCHEDULE_INTERVAL=60
 
 # --- AWS ---------------------------------------------------------------------
 # AWS region for the EC2 instance and EventBridge Scheduler
-# Pick the one from AWS regions that is closed to you
+# Pick the one from AWS regions that is closest to you
 AWS_REGION="eu-north-1"
 
 # --- Installation Options ----------------------------------------------------
@@ -63,13 +63,11 @@ UBUNTU_USER="ubuntu"
 SETUP_ACTINGWEB=true
 
 # Gmail MCP (optional — enables email triage)
+# Uses Anthropic's hosted connector at https://gmail.mcp.claude.com/mcp
+# Authentication is via interactive Google sign-in (no credentials needed)
 SETUP_GMAIL=false
 
 # Google Calendar MCP (optional — enables calendar preview)
+# Uses Anthropic's hosted connector at https://gcal.mcp.claude.com/mcp
+# Authentication is via interactive Google sign-in (no credentials needed)
 SETUP_GOOGLE_CALENDAR=false
-
-# Google OAuth credentials (required if SETUP_GMAIL or SETUP_GOOGLE_CALENDAR is true)
-# Get these from https://console.cloud.google.com -> APIs & Services -> Credentials
-# GOOGLE_CLIENT_ID=""
-# GOOGLE_CLIENT_SECRET=""
-# GOOGLE_REFRESH_TOKEN=""
