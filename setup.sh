@@ -473,14 +473,11 @@ chmod +x "${HOME_DIR}/scripts/run-agent.sh"
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/run-agent.sh"
 
 # Create systemd service for agent orchestrator
-# Conditionally depend on maestral service if Dropbox is enabled
-if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  AFTER_DEPS="After=network-online.target maestral.service"
-  WANTS_DEPS="Wants=network-online.target maestral.service"
-else
-  AFTER_DEPS="After=network-online.target"
-  WANTS_DEPS="Wants=network-online.target"
-fi
+# Network dependency only — Maestral runs as a user service which
+# system services cannot depend on. The orchestrator script handles
+# checking/starting Maestral itself.
+AFTER_DEPS="After=network-online.target"
+WANTS_DEPS="Wants=network-online.target"
 
 cat > /etc/systemd/system/agent-boot-runner.service << EOF
 [Unit]

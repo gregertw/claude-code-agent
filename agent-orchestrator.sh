@@ -101,6 +101,14 @@ done
 # --- 2. Wait for Dropbox sync (if configured) --------------------------------
 if [[ "${FILE_SYNC}" == "dropbox" ]]; then
   echo "Waiting for Dropbox sync..."
+
+  # Ensure Maestral daemon is running
+  if ! maestral status &>/dev/null; then
+    echo "  Maestral not running, starting..."
+    maestral start 2>/dev/null || true
+    sleep 3
+  fi
+
   SYNC_TIMEOUT=180
   SYNC_START=$(date +%s)
   SEEN_UP_TO_DATE=false
@@ -110,8 +118,8 @@ if [[ "${FILE_SYNC}" == "dropbox" ]]; then
       echo "WARNING: Dropbox sync timeout (${SYNC_TIMEOUT}s). Proceeding."
       break
     fi
-    STATUS=$(maestral status 2>/dev/null | grep -i "Status:" | awk -F': *' '{print $2}' || echo "not running")
-    if [[ "$STATUS" == *"Up to date"* ]]; then
+    STATUS=$(maestral status 2>/dev/null || echo "not running")
+    if echo "${STATUS}" | grep -qi "up to date"; then
       if [[ "$SEEN_UP_TO_DATE" == true ]]; then
         echo "Dropbox synced (confirmed stable)."
         break
@@ -124,7 +132,9 @@ if [[ "${FILE_SYNC}" == "dropbox" ]]; then
     else
       SEEN_UP_TO_DATE=false
     fi
-    echo "  Dropbox: ${STATUS} (${ELAPSED}s elapsed)"
+    # Extract just the status line for display
+    STATUS_LINE=$(echo "${STATUS}" | grep -i "Status:" | head -1 || echo "${STATUS}")
+    echo "  Dropbox: ${STATUS_LINE} (${ELAPSED}s elapsed)"
     sleep 10
   done
 else
@@ -242,7 +252,7 @@ echo "=== Claude Code finished (exit code: ${CLAUDE_EXIT}) ==="
 if [[ "${FILE_SYNC}" == "dropbox" ]]; then
   echo "Waiting for Dropbox to sync outputs..."
   sleep 30
-  FINAL_STATUS=$(maestral status 2>/dev/null | grep -i "Status:" | awk -F': *' '{print $2}' || echo "unknown")
+  FINAL_STATUS=$(maestral status 2>/dev/null | grep -i "Status:" | head -1 || echo "unknown")
   echo "Dropbox status: ${FINAL_STATUS}"
 fi
 
