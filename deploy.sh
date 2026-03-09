@@ -325,18 +325,7 @@ CLAUDE_VERSION=$(ssh "${SSH_HOST}" "export PATH=\"\$HOME/.local/bin:\$PATH\" && 
 log "Claude Code ${CLAUDE_VERSION} installed on server."
 
 # =============================================================================
-step 10 "Register MCP Servers"
-# =============================================================================
-log "Running setup-mcp.sh on server to register MCP servers..."
-ssh "${SSH_HOST}" "source ~/.agent-env 2>/dev/null; export PATH=\"\$HOME/.local/bin:\$PATH\"; chmod +x ~/setup-mcp.sh && ~/setup-mcp.sh" 2>&1 | while IFS= read -r line; do
-  if echo "$line" | grep -qE '\[(MCP|NOTE|ERROR)\]'; then
-    echo "$line"
-  fi
-done
-log "MCP servers registered (authentication needed in post-deploy)."
-
-# =============================================================================
-step 11 "Deploy EventBridge Scheduler"
+step 10 "Deploy EventBridge Scheduler"
 # =============================================================================
 if [[ "${SCHEDULE_MODE}" == "scheduled" && "${SKIP_SCHEDULER}" == "false" ]]; then
   log "Deploying EventBridge scheduler (every ${SCHEDULE_INTERVAL} minutes)..."
@@ -362,22 +351,19 @@ fi
 POST_STEPS=""
 STEP_NUM=1
 
-POST_STEPS="${POST_STEPS}\n   Use SSH for all setup steps (not the web terminal) — OAuth needs port forwarding.\n"
+POST_STEPS="${POST_STEPS}\n   Connect with: ./agent-manager.sh --ssh-mcp (use one session for all steps)\n"
 
-if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Link Dropbox: ssh agent, then ~/setup-dropbox.sh"
-  STEP_NUM=$((STEP_NUM + 1))
-fi
+POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Run post-deploy setup: ~/agent-setup.sh"
+POST_STEPS="${POST_STEPS}\n   (Handles Dropbox, brain directory, templates, and MCP registration)"
+STEP_NUM=$((STEP_NUM + 1))
 
 if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
-  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate Claude Code: ./agent-manager.sh --ssh-mcp, then run 'claude'"
-  STEP_NUM=$((STEP_NUM + 1))
+  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate Claude Code and MCP servers:"
+  POST_STEPS="${POST_STEPS}\n   Follow the next-steps printed by agent-setup.sh"
 else
-  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Verify Claude Code: ./agent-manager.sh --ssh-mcp, then run 'claude'"
-  STEP_NUM=$((STEP_NUM + 1))
+  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate MCP servers (if needed):"
+  POST_STEPS="${POST_STEPS}\n   Follow the next-steps printed by agent-setup.sh"
 fi
-
-POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate MCP servers: /mcp in Claude Code (same SSH session)"
 STEP_NUM=$((STEP_NUM + 1))
 
 POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Test the orchestrator: ~/scripts/agent-orchestrator.sh --no-stop"

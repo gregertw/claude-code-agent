@@ -109,62 +109,47 @@ chmod +x setup.sh
 sudo ./setup.sh
 ```
 
-### Step 5: Post-Setup (with Dropbox)
+### Step 5: Post-Deploy Setup
+
+Connect with SSH port forwarding (required for OAuth authentication):
 
 ```bash
-# a) Link Dropbox, configure selective sync, and install templates
-~/setup-dropbox.sh
-```
-
-The `setup-dropbox.sh` script handles the full Dropbox setup in one go:
-
-1. **Links your account** — runs `dropboxd`, which prints a URL to open in your
-   browser. After authorizing, the script automatically detects the "linked"
-   message and continues.
-2. **Configures selective sync** — excludes everything from syncing except your
-   brain folder (`brain/` by default). This prevents the server from downloading
-   your entire Dropbox.
-3. **Creates the brain folder** if it doesn't exist yet in Dropbox.
-4. **Installs template files** into the brain directory.
-
-**What to expect from `dropboxd`:** The first run prints several `dropbox: load fq extension`
-lines and a deprecation warning — these are normal and can be ignored. It then prints a
-URL to visit. After you authorize in the browser, you'll see
-`This computer is now linked to Dropbox. Welcome <your name>` and the script continues
-automatically.
-
-```bash
-# c) Verify Claude Code
-claude --version
-echo 'Reply: Hello' | claude -p
-
-# d) Configure MCP connections
-~/setup-mcp.sh
-
-# e) Authenticate MCP servers (requires SSH tunnel — see below)
-```
-
-### Step 6: Post-Setup (without Dropbox)
-
-Template files are installed automatically into `~/brain/` when not using Dropbox.
-
-### Step 7: Authenticate Claude Code and MCP Servers
-
-Claude Code needs to be authenticated on first run (API key or account login).
-MCP servers need OAuth authentication. Since there's no browser on the
-server, use SSH port forwarding so the OAuth callback reaches the server
-from your local browser.
-
-If you used `deploy.sh`, SSH config is already set up and you can use
-`agent-manager.sh`. For manual setup, configure SSH first (Step 8 below),
-then come back here.
-
-```bash
-# On your LOCAL machine — connect with MCP port forwarding:
+# On your LOCAL machine:
 ./agent-manager.sh --ssh-mcp
+# Or for manual setup: ssh -L 18850:127.0.0.1:18850 -L 18851:127.0.0.1:18851 -L 18852:127.0.0.1:18852 agent
+```
 
-# Change to the brain directory first:
+Then on the server, run the unified setup script:
+
+```bash
+~/agent-setup.sh
+```
+
+This handles everything in the right order based on `agent.conf`:
+
+1. **Dropbox** (if configured): links account, configures selective sync, starts service
+2. **Brain directory**: creates folders and installs template files
+3. **MCP servers**: registers any that aren't already connected
+4. **Claude Code**: checks authentication status
+
+The script is safe to re-run — each step checks if it's already done and skips it.
+
+**What to expect:** If using Dropbox, expect noisy output (`dropbox: load fq extension`
+lines and deprecation warnings) — these are normal. After authorizing in the browser,
+you'll see `This computer is now linked to Dropbox` and the script continues automatically.
+
+At the end, the script prints next steps if anything still needs attention.
+
+### Step 6: Authenticate Claude Code and MCP Servers
+
+If `agent-setup.sh` reported that authentication is needed, follow its instructions.
+Still in the same SSH session:
+
+```bash
+# Change to the brain directory (path depends on your agent.conf):
 cd ~/Dropbox/brain    # or ~/brain if not using Dropbox
+
+# Start Claude Code:
 claude
 # On first run, Claude Code asks for light/dark theme and then
 # authentication (API key or account login). Complete that first.
@@ -367,7 +352,7 @@ htop
 1. Launch new EC2 (same settings as Step 2)
 2. Associate the Elastic IP with the new instance
 3. Upload the agent-server directory and run `setup.sh`
-4. Set API key, link Dropbox (if using), run `setup-mcp.sh`
+4. Set API key, run `~/agent-setup.sh`, authenticate Claude Code and MCP
 5. If using scheduled mode: `./agent-manager.sh --scheduled`
 
 Keep this directory in your Dropbox or backed up — it's the source of truth for rebuilding.
@@ -383,7 +368,7 @@ Keep this directory in your Dropbox or backed up — it's the source of truth fo
 | `~/.agent-schedule` | Schedule mode config |
 | `~/.claude.json` | MCP server connections |
 | `~/.claude/settings.json` | Claude Code tool permissions |
-| `~/setup-dropbox.sh` | Link Dropbox, selective sync, install templates |
+| `~/agent-setup.sh` | Post-deploy setup (Dropbox, brain dir, MCP servers) |
 | `~/scripts/agent-orchestrator.sh` | Orchestrator (copied from package) |
 | `~/scripts/run-agent.sh` | Run a one-off agent task with logging |
 | `~/scripts/set-schedule-mode.sh` | Toggle always-on / scheduled |

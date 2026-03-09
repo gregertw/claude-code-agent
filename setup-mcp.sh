@@ -45,6 +45,19 @@ SETUP_ACTINGWEB="${SETUP_ACTINGWEB:-true}"
 SETUP_GMAIL="${SETUP_GMAIL:-false}"
 SETUP_GOOGLE_CALENDAR="${SETUP_GOOGLE_CALENDAR:-false}"
 
+# Check which MCP servers are already connected (e.g. from Claude account)
+export PATH="${HOME}/.local/bin:$PATH"
+EXISTING_MCP=""
+if command -v claude &>/dev/null; then
+  EXISTING_MCP=$(claude mcp list 2>/dev/null || true)
+fi
+
+# Helper: check if an MCP server URL is already connected
+is_connected() {
+  local url="$1"
+  echo "${EXISTING_MCP}" | grep -q "${url}.*Connected" 2>/dev/null
+}
+
 echo "============================================================"
 echo " MCP Server Configuration for Agent Server"
 echo "============================================================"
@@ -71,6 +84,9 @@ if [[ "$FILTER" != "--actingweb" && "$SETUP_ACTINGWEB" != "true" ]]; then
 fi
 
 if [[ "$SHOULD_SETUP_AW" == "true" ]]; then
+  if is_connected "ai.actingweb.io"; then
+    log "ActingWeb is already connected (from Claude account). Skipping."
+  else
   log "Adding ActingWeb MCP server (remote HTTP with OAuth)..."
   claude mcp add-json actingweb '{"type":"http","url":"https://ai.actingweb.io/mcp","oauth":{"callbackPort":18850}}' 2>/dev/null || {
     warn "claude mcp add-json failed. Adding manually to ~/.claude.json..."
@@ -100,6 +116,7 @@ PYEOF
   }
   log "ActingWeb configured for Claude Code."
   echo ""
+  fi # end is_connected check
 fi
 
 fi # end actingweb
@@ -127,6 +144,9 @@ echo ""
 
 # --- Gmail ---
 if [[ "$SETUP_GMAIL" == "true" || "$FILTER" == "--google" ]]; then
+  if is_connected "gmail.mcp.claude.com"; then
+    log "Gmail is already connected (from Claude account). Skipping."
+  else
   log "Adding Gmail MCP server (Anthropic hosted connector)..."
   claude mcp add-json gmail '{"type":"http","url":"https://gmail.mcp.claude.com/mcp","oauth":{"callbackPort":18851}}' 2>/dev/null || {
     warn "claude mcp add-json failed for Gmail. Adding manually..."
@@ -151,10 +171,14 @@ print(f"    Written to {config_path}")
 PYEOF
   }
   log "Gmail configured."
+  fi # end is_connected check
 fi
 
 # --- Google Calendar ---
 if [[ "$SETUP_GOOGLE_CALENDAR" == "true" || "$FILTER" == "--google" ]]; then
+  if is_connected "gcal.mcp.claude.com"; then
+    log "Google Calendar is already connected (from Claude account). Skipping."
+  else
   log "Adding Google Calendar MCP server (Anthropic hosted connector)..."
   claude mcp add-json google-calendar '{"type":"http","url":"https://gcal.mcp.claude.com/mcp","oauth":{"callbackPort":18852}}' 2>/dev/null || {
     warn "claude mcp add-json failed for Calendar. Adding manually..."
@@ -179,6 +203,7 @@ print(f"    Written to {config_path}")
 PYEOF
   }
   log "Google Calendar configured."
+  fi # end is_connected check
 fi
 
 echo ""

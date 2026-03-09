@@ -229,17 +229,10 @@ EOF
 
   systemctl daemon-reload
   # NOTE: Do not enable/start Dropbox service here — it needs account linking first.
-  # The setup-dropbox.sh script will enable and start it after the user links their account.
-
-  # Copy Dropbox setup helper
-  if [[ -f "${SCRIPT_DIR}/setup-dropbox.sh" ]]; then
-    cp "${SCRIPT_DIR}/setup-dropbox.sh" "${HOME_DIR}/setup-dropbox.sh"
-    chmod +x "${HOME_DIR}/setup-dropbox.sh"
-    chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/setup-dropbox.sh"
-  fi
+  # The agent-setup.sh script will enable and start it after the user links their account.
 
   log "Dropbox installed (not started — requires account linking)."
-  log "Run ~/setup-dropbox.sh to link, configure selective sync, and install templates."
+  log "Run ~/agent-setup.sh to link, configure selective sync, and install templates."
 else
   log "File sync: none. Brain directory will be local at ${BRAIN_DIR}"
   # Create the local brain directory structure
@@ -681,12 +674,12 @@ log "Login banner installed."
 # --- 20. Install template files ----------------------------------------------
 log "Installing template files..."
 
-# Copy MCP setup script
-if [[ -f "${SCRIPT_DIR}/setup-mcp.sh" ]]; then
-  cp "${SCRIPT_DIR}/setup-mcp.sh" "${HOME_DIR}/setup-mcp.sh"
-  chmod +x "${HOME_DIR}/setup-mcp.sh"
-  chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/setup-mcp.sh"
-  log "setup-mcp.sh copied to home directory."
+# Copy agent-setup.sh (unified post-deploy setup)
+if [[ -f "${SCRIPT_DIR}/agent-setup.sh" ]]; then
+  cp "${SCRIPT_DIR}/agent-setup.sh" "${HOME_DIR}/agent-setup.sh"
+  chmod +x "${HOME_DIR}/agent-setup.sh"
+  chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/agent-setup.sh"
+  log "agent-setup.sh copied to home directory."
 fi
 
 # Handle template installation based on sync mode
@@ -844,26 +837,9 @@ echo "   Then: source ~/.agent-env"
 echo ""
 STEP=$((STEP + 1))
 
-if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  echo "${STEP}. SET UP DROPBOX (link, selective sync, install templates)"
-  echo "   ~/setup-dropbox.sh"
-  echo ""
-  STEP=$((STEP + 1))
-else
-  echo "   (No Dropbox setup needed — brain directory is local at ${BRAIN_DIR})"
-  echo "   Template files have been installed automatically."
-  echo ""
-fi
-
-echo "${STEP}. VERIFY CLAUDE CODE"
-echo "   claude --version"
-echo "   echo 'Reply: Hello' | claude -p"
-echo ""
-STEP=$((STEP + 1))
-
-echo "${STEP}. CONFIGURE MCP CONNECTIONS"
-echo "   ~/setup-mcp.sh"
-echo "   (ActingWeb is required; Gmail and Calendar are optional)"
+echo "${STEP}. RUN POST-DEPLOY SETUP"
+echo "   ~/agent-setup.sh"
+echo "   (Handles Dropbox, brain directory, MCP servers, and verification)"
 echo ""
 STEP=$((STEP + 1))
 
