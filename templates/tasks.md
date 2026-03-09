@@ -17,7 +17,7 @@ For personal context, see [personal](personal.md). For writing style, see [style
 ## Execution Context
 
 You are running as an AI agent in the owner's workspace. You have:
-- Access to the brain directory (local filesystem or synced via Dropbox)
+- Access to the brain directory (local filesystem)
 - MCP connections (ActingWeb memories, and optionally Gmail, Calendar)
 - Internet access for web search and API calls
 

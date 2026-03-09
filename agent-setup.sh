@@ -7,8 +7,8 @@
 # Safe to re-run — each step checks if it's already done and skips/verifies.
 #
 # Steps (in order):
-#   1. Dropbox: link account, selective sync, brain folder (if FILE_SYNC=dropbox)
-#   2. Brain directory: create if missing, install template files
+#   1. Brain directory: create if missing, install template files
+#   2. Claude Code: verify authentication
 #   3. MCP servers: register any that aren't already connected
 #   4. Summary: show status and next steps
 #
@@ -44,19 +44,11 @@ source "${HOME}/.agent-server.conf" 2>/dev/null || {
   exit 1
 }
 
-FILE_SYNC="${FILE_SYNC:-none}"
-BRAIN_FOLDER="${BRAIN_FOLDER:-brain}"
 OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
 SETUP_ACTINGWEB="${SETUP_ACTINGWEB:-true}"
 SETUP_GMAIL="${SETUP_GMAIL:-false}"
 SETUP_GOOGLE_CALENDAR="${SETUP_GOOGLE_CALENDAR:-false}"
-
-if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  DROPBOX_DIR="${HOME}/Dropbox"
-  BRAIN_DIR="${DROPBOX_DIR}/${BRAIN_FOLDER}"
-else
-  BRAIN_DIR="${HOME}/brain"
-fi
+BRAIN_DIR="${HOME}/brain"
 
 export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:/usr/local/bin:$PATH"
 
@@ -69,178 +61,12 @@ echo ""
 ISSUES=0
 
 # =============================================================================
-# Step 1: Dropbox (if configured)
+# Step 1: Brain directory and templates
 # =============================================================================
-if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  echo -e "${BOLD}Step 1: Dropbox (via Maestral)${NC}"
-  echo "────────────────────────────────────────"
-
-  MAESTRAL_BIN="${HOME}/.local/bin/maestral"
-
-  if ! command -v "${MAESTRAL_BIN}" &>/dev/null; then
-    err "Maestral not installed. Run setup.sh first."
-    exit 1
-  fi
-
-  # 1a. Link account
-  MAESTRAL_AUTH=$("${MAESTRAL_BIN}" auth status 2>/dev/null || true)
-  if echo "${MAESTRAL_AUTH}" | grep -qi "linked"; then
-    LINKED_EMAIL=$(echo "${MAESTRAL_AUTH}" | grep -i "email" | sed 's/.*:[[:space:]]*//')
-    ok "Account linked (${LINKED_EMAIL})"
-  elif [[ "${VERIFY_ONLY}" == "true" ]]; then
-    need "Account not linked"
-    ISSUES=$((ISSUES + 1))
-  else
-    log "Linking Dropbox account..."
-    echo ""
-    echo "  Maestral will print a URL. Open it in your browser,"
-    echo "  authorize the app, then paste the authorization code here."
-    echo ""
-
-    "${MAESTRAL_BIN}" auth link
-    LINK_EXIT=$?
-    if [[ $LINK_EXIT -ne 0 ]]; then
-      err "Linking failed (exit code ${LINK_EXIT}). Run ~/agent-setup.sh again to retry."
-      exit 1
-    fi
-    ok "Account linked successfully"
-  fi
-
-  # 1b. Configure sync directory
-  CURRENT_PATH=$("${MAESTRAL_BIN}" config get path 2>/dev/null || true)
-  if [[ -n "${CURRENT_PATH}" && -d "${CURRENT_PATH}" ]]; then
-    ok "Sync directory: ${CURRENT_PATH}"
-  elif [[ "${VERIFY_ONLY}" == "true" ]]; then
-    need "Sync directory not configured"
-    ISSUES=$((ISSUES + 1))
-  else
-    log "Configuring sync directory..."
-    # Stop daemon if running (path changes require restart)
-    "${MAESTRAL_BIN}" stop 2>/dev/null || true
-    sleep 1
-
-    mkdir -p "${DROPBOX_DIR}"
-    "${MAESTRAL_BIN}" config set path "${DROPBOX_DIR}"
-    ok "Sync directory: ${DROPBOX_DIR}"
-  fi
-
-  # 1c. Start Maestral daemon (paused, so it doesn't sync before exclusions are set)
-  MAESTRAL_RUNNING=false
-  NEEDS_EXCLUSIONS=false
-  if "${MAESTRAL_BIN}" status 2>/dev/null | grep -qi "Status:"; then
-    MAESTRAL_RUNNING=true
-    ok "Maestral daemon running"
-  elif [[ "${VERIFY_ONLY}" != "true" ]]; then
-    log "Starting Maestral daemon (paused)..."
-    "${MAESTRAL_BIN}" start 2>/dev/null || true
-    sleep 3
-    # Immediately pause to prevent syncing before exclusions are configured
-    "${MAESTRAL_BIN}" pause 2>/dev/null || true
-    NEEDS_EXCLUSIONS=true
-
-    if "${MAESTRAL_BIN}" status 2>/dev/null | grep -qi "Status:"; then
-      MAESTRAL_RUNNING=true
-      ok "Maestral started (paused for exclusion setup)"
-    else
-      warn "Maestral failed to start"
-      ISSUES=$((ISSUES + 1))
-    fi
-  else
-    need "Maestral not running"
-    ISSUES=$((ISSUES + 1))
-  fi
-
-  # 1d. Selective sync — exclude everything except brain folder
-  # Uses maestral ls to query remote folders from the server BEFORE syncing them down.
-  if [[ "${MAESTRAL_RUNNING}" == "true" ]]; then
-
-    # Get current exclusion list
-    EXCLUDED_LIST=$("${MAESTRAL_BIN}" excluded list 2>/dev/null || true)
-
-    # Check if exclusions are already configured
-    if echo "${EXCLUDED_LIST}" | grep -qi "excluded" && [[ "${NEEDS_EXCLUSIONS}" == "false" ]]; then
-      # "No excluded files or folders." contains "excluded", real entries don't
-      # So if grep matches, it means no exclusions exist yet
-      NEEDS_EXCLUSIONS=true
-    elif [[ "${NEEDS_EXCLUSIONS}" == "false" ]] && echo "${EXCLUDED_LIST}" | grep -q "/"; then
-      # Has exclusion entries (paths start with /)
-      EXCLUDED_COUNT=$(echo "${EXCLUDED_LIST}" | grep -c "/" || true)
-      ok "Selective sync configured (${EXCLUDED_COUNT} folder(s) excluded)"
-    fi
-
-    if [[ "${NEEDS_EXCLUSIONS}" == "true" || "${VERIFY_ONLY}" == "true" ]]; then
-      # List remote top-level entries (queries Dropbox server, no local sync needed)
-      log "Querying Dropbox for folder listing..."
-      REMOTE_OUTPUT=$("${MAESTRAL_BIN}" ls 2>&1 || true)
-      echo "  Remote folders found:"
-      echo "${REMOTE_OUTPUT}" | head -20 | sed 's/^/    /'
-
-      EXCLUDED=0
-      ALREADY_EXCLUDED=0
-      while IFS= read -r item; do
-        # Skip empty lines
-        [[ -z "$item" ]] && continue
-        # Strip whitespace and trailing slashes
-        item=$(echo "$item" | xargs | sed 's/\/$//')
-        [[ -z "$item" ]] && continue
-        # Skip the brain folder
-        [[ "${item,,}" == "${BRAIN_FOLDER,,}" ]] && continue
-
-        if [[ "${VERIFY_ONLY}" == "true" ]]; then
-          if ! echo "${EXCLUDED_LIST}" | grep -qi "$item" 2>/dev/null; then
-            need "Not excluded: $item"
-            ISSUES=$((ISSUES + 1))
-          fi
-        else
-          # Check if already excluded
-          if echo "${EXCLUDED_LIST}" | grep -qi "$item" 2>/dev/null; then
-            ALREADY_EXCLUDED=$((ALREADY_EXCLUDED + 1))
-          else
-            if "${MAESTRAL_BIN}" excluded add "$item" 2>&1; then
-              EXCLUDED=$((EXCLUDED + 1))
-            fi
-          fi
-        fi
-      done <<< "${REMOTE_OUTPUT}"
-
-      if [[ $EXCLUDED -gt 0 ]]; then
-        ok "Excluded ${EXCLUDED} folder(s) from sync"
-      fi
-      if [[ $ALREADY_EXCLUDED -gt 0 ]]; then
-        skip "${ALREADY_EXCLUDED} folder(s) already excluded"
-      fi
-      if [[ $EXCLUDED -eq 0 && $ALREADY_EXCLUDED -eq 0 && "${VERIFY_ONLY}" != "true" ]]; then
-        ok "Selective sync configured (only '${BRAIN_FOLDER}/' syncing)"
-      fi
-    fi
-  else
-    warn "Skipping selective sync — Maestral not running"
-    ISSUES=$((ISSUES + 1))
-  fi
-
-  # 1e. Resume sync (if we paused it for exclusion setup)
-  if [[ "${MAESTRAL_RUNNING}" == "true" ]]; then
-    if "${MAESTRAL_BIN}" status 2>/dev/null | grep -qi "paused"; then
-      log "Resuming sync..."
-      "${MAESTRAL_BIN}" resume 2>/dev/null || true
-      sleep 2
-      ok "Sync resumed"
-    fi
-  fi
-
-  echo ""
-fi
-
-# =============================================================================
-# Step 2: Brain directory and templates
-# =============================================================================
-STEP_NUM=2
-[[ "${FILE_SYNC}" != "dropbox" ]] && STEP_NUM=1
-
-echo -e "${BOLD}Step ${STEP_NUM}: Brain directory${NC}"
+echo -e "${BOLD}Step 1: Brain directory${NC}"
 echo "────────────────────────────────────────"
 
-# 2a. Brain directory exists
+# 1a. Brain directory exists
 if [[ -d "${BRAIN_DIR}" ]]; then
   ok "Brain directory exists: ${BRAIN_DIR}"
 elif [[ "${VERIFY_ONLY}" == "true" ]]; then
@@ -252,7 +78,7 @@ else
   ok "Created: ${BRAIN_DIR}"
 fi
 
-# 2b. Template files installed
+# 1b. Template files installed
 TEMPLATES_INSTALLED=true
 for tmpl in tasks.md default-tasks.md personal.md style.md; do
   if [[ ! -f "${BRAIN_DIR}/ai/instructions/${tmpl}" ]]; then
@@ -280,7 +106,7 @@ else
   fi
 fi
 
-# 2c. Output directories
+# 1c. Output directories
 DIRS_OK=true
 for subdir in tasks logs research improvements; do
   if [[ ! -d "${BRAIN_DIR}/${OUTPUT_FOLDER}/${subdir}" ]]; then
@@ -308,10 +134,9 @@ fi
 echo ""
 
 # =============================================================================
-# Step 3: Claude Code authentication
+# Step 2: Claude Code authentication
 # =============================================================================
-STEP_NUM=$((STEP_NUM + 1))
-echo -e "${BOLD}Step ${STEP_NUM}: Claude Code${NC}"
+echo -e "${BOLD}Step 2: Claude Code${NC}"
 echo "────────────────────────────────────────"
 
 # Check if Claude Code is authenticated
@@ -343,10 +168,9 @@ fi
 echo ""
 
 # =============================================================================
-# Step 4: MCP servers
+# Step 3: MCP servers
 # =============================================================================
-STEP_NUM=$((STEP_NUM + 1))
-echo -e "${BOLD}Step ${STEP_NUM}: MCP servers${NC}"
+echo -e "${BOLD}Step 3: MCP servers${NC}"
 echo "────────────────────────────────────────"
 
 # MCP registration requires Claude Code to be initialized first

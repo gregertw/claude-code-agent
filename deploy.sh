@@ -4,7 +4,6 @@
 # =============================================================================
 # Creates all AWS resources, configures the server, and registers MCP servers.
 # After this script completes, follow the guided post-deploy steps to:
-#   - Link Dropbox (if using)
 #   - Authenticate Claude Code (API key or account login)
 #   - Authenticate MCP servers (ActingWeb, Gmail, Calendar)
 #
@@ -63,7 +62,6 @@ AWS_REGION="${AWS_REGION:-eu-north-1}"
 SCHEDULE_MODE="${SCHEDULE_MODE:-always-on}"
 SCHEDULE_INTERVAL="${SCHEDULE_INTERVAL:-60}"
 INSTALL_TTYD="${INSTALL_TTYD:-false}"
-FILE_SYNC="${FILE_SYNC:-dropbox}"
 KEY_NAME="agent-server-key"
 SG_NAME="agent-server-sg"
 INSTANCE_NAME="agent-server"
@@ -87,7 +85,7 @@ if ! aws sts get-caller-identity &>/dev/null; then
 fi
 
 log "Deploying agent server for ${OWNER_NAME}"
-log "Region: ${AWS_REGION} | Mode: ${SCHEDULE_MODE} | File sync: ${FILE_SYNC}"
+log "Region: ${AWS_REGION} | Mode: ${SCHEDULE_MODE}"
 echo ""
 
 # --- Optional: set API key early if provided --------------------------------
@@ -370,11 +368,11 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
 fi
 
 POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Run post-deploy setup: ~/agent-setup.sh"
-POST_STEPS="${POST_STEPS}\n   (Handles Dropbox, brain directory, and MCP registration in one pass)"
+POST_STEPS="${POST_STEPS}\n   (Handles brain directory and MCP registration in one pass)"
 STEP_NUM=$((STEP_NUM + 1))
 
 POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate MCP servers:"
-POST_STEPS="${POST_STEPS}\n   cd ~/Dropbox/brain && claude"
+POST_STEPS="${POST_STEPS}\n   cd ~/brain && claude"
 POST_STEPS="${POST_STEPS}\n   Run /mcp and authenticate each server, then /exit"
 STEP_NUM=$((STEP_NUM + 1))
 
@@ -393,7 +391,6 @@ echo "Instance ID:  ${INSTANCE_ID}"
 echo "Elastic IP:   ${ELASTIC_IP}"
 echo "Region:       ${AWS_REGION}"
 echo "Mode:         ${SCHEDULE_MODE}"
-echo "File sync:    ${FILE_SYNC}"
 echo "Claude Code:  ${CLAUDE_VERSION}"
 if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
   echo "API key:      configured"

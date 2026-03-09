@@ -2,15 +2,6 @@
 
 Create a cloud instance that runs the agent autonomously.
 
-## Two Modes of File Access
-
-| | With Dropbox | Without Dropbox |
-|---|---|---|
-| File access | Synced everywhere — edit from any device | SSH, web terminal (ttyd), or ActingWeb only |
-| Task inbox | Drop files from phone/laptop via Dropbox | Drop files via SSH/ttyd, or queue via ActingWeb |
-| Best for | Users who already use Dropbox/Obsidian | Minimal setup, server-only workflows |
-| Config | `FILE_SYNC="dropbox"` | `FILE_SYNC="none"` + `INSTALL_TTYD=true` |
-
 ## Prerequisites
 
 - An AWS account
@@ -18,25 +9,24 @@ Create a cloud instance that runs the agent autonomously.
 - **One of:**
   - An Anthropic API key from [console.anthropic.com](https://console.anthropic.com), **or**
   - A Claude Pro, Max, or Enterprise subscription (logged into Claude Code locally)
-- A Dropbox account (only if using Dropbox sync)
 
 ## Quick Deploy (recommended)
 
 The `deploy.sh` script creates all AWS infrastructure and configures the server.
-After it completes, you follow guided steps to link Dropbox (if using),
-authenticate Claude Code, and authenticate MCP servers.
+After it completes, you follow guided steps to authenticate Claude Code and
+MCP servers.
 
 ```bash
 # 1. Configure
 cp agent.conf.example agent.conf
-nano agent.conf    # set OWNER_NAME, FILE_SYNC, SCHEDULE_MODE, etc.
+nano agent.conf    # set OWNER_NAME, SCHEDULE_MODE, etc.
 
 # 2. Deploy (optionally set API key — or log in on the server later)
 export ANTHROPIC_API_KEY="sk-ant-..."   # optional
 ./deploy.sh
 
 # 3. Follow the post-deploy steps printed at the end
-#    (Dropbox linking, Claude Code auth, MCP auth, test run)
+#    (Claude Code auth, MCP auth, test run)
 ```
 
 To tear everything down: `./teardown.sh`
@@ -59,14 +49,9 @@ nano agent.conf
 Fill in at minimum:
 
 - `OWNER_NAME` — your name
-- `FILE_SYNC` — `"dropbox"` or `"none"`
 - `SCHEDULE_MODE` — `"always-on"` or `"scheduled"`
 
-If using Dropbox:
-
-- `BRAIN_FOLDER` — name of the Dropbox subfolder containing your vault
-
-If not using Dropbox:
+Optional:
 
 - `INSTALL_TTYD=true` — enables browser-based terminal access
 - `TTYD_USER` / `TTYD_PASSWORD` — credentials for the web terminal
@@ -137,24 +122,18 @@ Then run the unified setup script:
 
 This handles everything in the right order based on `agent.conf`:
 
-1. **Dropbox** (if configured): links Maestral, configures selective sync, starts daemon
-2. **Brain directory**: creates folders and installs template files
-3. **Claude Code**: verifies authentication
-4. **MCP servers**: registers servers configured in `agent.conf`
+1. **Brain directory**: creates folders and installs template files
+2. **Claude Code**: verifies authentication
+3. **MCP servers**: registers servers configured in `agent.conf`
 
 The script is safe to re-run — each step checks if it's already done and skips it.
-
-**What to expect:** If using Dropbox, Maestral will print a URL. Open it in your browser,
-authorize the app, and paste the authorization code back into the terminal. Maestral then
-queries your Dropbox folders from the server and excludes everything except the brain folder
-— no files are downloaded until selective sync is configured.
 
 ### Step 6: Authenticate MCP Servers
 
 Start Claude Code in the brain directory and authenticate each MCP server:
 
 ```bash
-cd ~/Dropbox/brain    # or ~/brain if not using Dropbox
+cd ~/brain
 claude
 # /mcp → select server → Authenticate → browser opens for sign-in
 # Repeat for each server, then /exit
@@ -219,9 +198,6 @@ https://<elastic-ip>
 
 Log in with the `TTYD_USER` and `TTYD_PASSWORD` from your `agent.conf`.
 This gives full shell access — you can run `claude`, edit files, view logs, etc.
-
-ttyd is especially useful when not using Dropbox, as it provides easy access to the
-brain directory and logs without needing an SSH client.
 
 **Security notes:**
 
@@ -314,8 +290,7 @@ cat ~/logs/orchestrator-*.log      # orchestrator shell output
 The orchestrator writes a heartbeat file after each run:
 
 ```bash
-cat ~/brain/output/.agent-heartbeat       # without Dropbox
-cat ~/Dropbox/brain/output/.agent-heartbeat  # with Dropbox
+cat ~/brain/output/.agent-heartbeat
 ```
 
 ## Debugging (prevent self-stop)
@@ -351,16 +326,12 @@ claude --version
 # Disk usage
 df -h
 
-# Dropbox health (if configured)
-maestral status
-
 # Process monitoring
 htop
 ```
 
 ### If the instance reboots
 
-- Maestral (Dropbox sync) restarts automatically (systemd user service) — if configured
 - ttyd restarts automatically (systemd) — if configured
 - In scheduled mode: boot runner executes tasks, then stops
 - Cron jobs persist
@@ -377,7 +348,7 @@ htop
 4. Set API key, run `~/agent-setup.sh`, authenticate Claude Code and MCP
 5. If using scheduled mode: `./agent-manager.sh --scheduled`
 
-Keep this directory in your Dropbox or backed up — it's the source of truth for rebuilding.
+Keep this directory backed up — it's the source of truth for rebuilding.
 
 ---
 
@@ -390,7 +361,7 @@ Keep this directory in your Dropbox or backed up — it's the source of truth fo
 | `~/.agent-schedule` | Schedule mode config |
 | `~/.claude.json` | MCP server connections |
 | `~/.claude/settings.json` | Claude Code tool permissions |
-| `~/agent-setup.sh` | Post-deploy setup (Dropbox, brain dir, MCP servers) |
+| `~/agent-setup.sh` | Post-deploy setup (brain dir, MCP servers) |
 | `~/scripts/agent-orchestrator.sh` | Orchestrator (copied from package) |
 | `~/scripts/run-agent.sh` | Run a one-off agent task with logging |
 | `~/scripts/set-schedule-mode.sh` | Toggle always-on / scheduled |

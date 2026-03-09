@@ -57,7 +57,7 @@ Edit `~/.claude/settings.json` to control what Claude can do autonomously:
     "allow": [
       "mcp__actingweb",
       "Read", "Write", "Edit", "Glob", "Grep",
-      "Bash(dropbox-cli *)",
+      "Bash(cat *)", "Bash(mkdir *)", "Bash(mv *)",
       "WebSearch", "WebFetch"
     ],
     "deny": []
@@ -66,15 +66,6 @@ Edit `~/.claude/settings.json` to control what Claude can do autonomously:
 ```
 
 Add tool patterns to `allow` for new capabilities. Be cautious with broad Bash permissions.
-
-## Using a Different Cloud Sync
-
-The system uses Dropbox but any sync service works if it:
-1. Has a headless Linux CLI
-2. Supports selective sync
-3. Reports sync status (so the orchestrator knows when files are ready)
-
-To adapt: replace the Dropbox sections in `setup.sh` and the sync-wait logic in `agent-orchestrator.sh`.
 
 ## Cost Optimization
 
@@ -85,5 +76,3 @@ To adapt: replace the Dropbox sections in `setup.sh` and the sync-wait logic in 
 | Always-on, t3.large, reserved 1yr | ~$33 |
 | Always-on, t3.large, on-demand | ~$67 |
 | Graviton (t4g.large), always-on, reserved | ~$24 |
-
-For Graviton (ARM): change the AMI to Ubuntu ARM64 and the Dropbox download URL in setup.sh (already handled automatically).

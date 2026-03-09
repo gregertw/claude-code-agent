@@ -50,7 +50,6 @@ Ask the user to confirm they have:
 Help the user create `agent.conf` from `agent.conf.example`. Ask them for:
 
 - `OWNER_NAME` — their name
-- `FILE_SYNC` — `"dropbox"` or `"none"`
 - `SCHEDULE_MODE` — `"always-on"` or `"scheduled"`
 - `AWS_REGION` — which AWS region (default: `eu-north-1`)
 - `INSTALL_TTYD` — want a web terminal? (`true`/`false`)
@@ -76,78 +75,33 @@ The user should paste the deploy status output back. Check it for:
 
 Then guide the user through each remaining step below.
 
-#### B5: Run post-deploy setup
+#### B5–B9: Post-deploy setup
 
-**Important:** All post-deploy steps require SSH with port forwarding —
-not the web terminal (ttyd). OAuth authentication needs the SSH tunnel.
-After setup is complete, the web terminal works for day-to-day use.
+Follow the steps in `docs/aws-setup.md` under **"Step 5: Post-Deploy Setup"**
+through **"Test the orchestrator"**. The order is:
 
-Tell the user to connect with MCP port forwarding:
-```
-./agent-manager.sh --ssh-mcp
-```
+1. **SSH in** with port forwarding: `./agent-manager.sh --ssh-mcp`
+2. **Log into Claude Code** (if not using API key): run `claude`, complete
+   theme + login, then `/exit`
+3. **Run `~/agent-setup.sh`** — handles brain directory
+   and MCP registration in one pass
+4. **Authenticate MCP servers**: `cd ~/brain && claude`, then `/mcp`
+   to authenticate each server, then `/exit`
+5. **Test**: `~/scripts/agent-orchestrator.sh --no-stop`
 
-Then run the unified setup script:
-```
-~/agent-setup.sh
-```
+**Important rules for guiding the user:**
+- All post-deploy steps require SSH with port forwarding (not ttyd)
+- If Claude Code asks for theme + login, guide based on API key vs account
+- If `/mcp` shows no servers, re-run `~/agent-setup.sh`
+- After setup, ttyd (if enabled) works for day-to-day access
 
-This script handles everything in the right order based on `agent.conf`:
-1. **Dropbox** (if configured): links account, configures selective sync, starts service
-2. **Brain directory**: creates folders and installs template files
-3. **MCP servers**: registers any that aren't already connected
-4. **Claude Code**: checks authentication status
-
-It's safe to re-run — each step checks if it's already done and skips it.
-Expect noisy Dropbox output (extension loading messages) — this is normal.
-
-At the end, the script prints next steps if anything still needs attention
-(Claude Code login, MCP authentication).
-
-#### B6: Authenticate Claude Code and MCP servers
-
-If `agent-setup.sh` reported that authentication is needed, follow the
-next-steps it printed. Still in the same SSH session:
-
-```
-cd ~/Dropbox/brain    # or ~/brain if not using Dropbox
-claude
-```
-
-**First-run setup:** Claude Code will ask to choose light/dark theme, then
-ask to log in or enter an API key. Guide based on what the user chose:
-
-- **API key:** If they already set `ANTHROPIC_API_KEY` via deploy.sh, Claude
-  Code should pick it up automatically. If not, they can enter it now.
-- **Account login:** Claude Code will provide a URL to open in the browser.
-  Since SSH port forwarding is active, the callback will work.
-
-Once Claude Code is running, check MCP servers with `/mcp`. If servers need
-authentication, select each one and authenticate. The SSH tunnel forwards
-the OAuth callback to the server.
-
-Confirm Claude Code is working and MCP servers are connected, then `/exit`.
-
-#### B7: Test the orchestrator
-
-Tell the user (still in the SSH session):
-```
-~/scripts/agent-orchestrator.sh --no-stop
-```
-This runs a full agent cycle without self-stopping. Check the output for
-errors. If everything works, the agent is ready.
-
-Tell the user to type `exit` to disconnect from the server.
-
-If ttyd was enabled, let the user know they can now use the web terminal
-at `https://<elastic-ip>` for day-to-day access (viewing logs, running
-tasks, editing files). SSH is only needed for OAuth re-authentication.
-
-#### B8: Personalize (optional)
+#### Personalize (optional)
 
 The `personal.md` and `style.md` files are **templates with placeholders**.
-Do NOT fill them in yourself. Instead, follow the personalization prompt
-in the setup guide which walks the user through filling them in interactively.
+Do NOT fill them in yourself. Instead, guide the user through filling them
+in interactively. For Option B, this must be done **on the server** — SSH in
+and run Claude Code in the brain directory (`cd ~/brain && claude`)
+to edit the files there.
 
 ### Important rules
 
@@ -208,7 +162,7 @@ Create a cloud instance that runs the agent autonomously on a schedule.
 - **Cost**: ~$11–67/month depending on schedule (plus API usage if using API key)
 - **Auth**: API key (usage-based) or account login (Pro/Max/Enterprise subscription)
 - **Runs unattended**: Yes — wakes on schedule, processes tasks, stops
-- **File access**: SSH, web terminal, or optional Dropbox sync
+- **File access**: SSH, web terminal, or git
 
 **[Go to AWS Setup Guide](docs/aws-setup.md)**
 
@@ -251,13 +205,6 @@ credentials needed.
 After adding, authenticate via OAuth (browser sign-in). On headless servers,
 Claude Code provides a URL to open manually — see your option's setup guide.
 
-### Dropbox (optional — for file sync)
-
-If you want to sync files across devices (phone, laptop, server):
-
-1. Have a Dropbox account
-2. Relevant for Option B (AWS) primarily, where it syncs the brain directory
-
 ---
 
 ## Task Architecture
@@ -278,8 +225,7 @@ Drop `.txt` or `.md` files in the `INBOX/` folder at the root of your brain dire
 # Option A: drop files directly into your brain directory
 echo "Research pricing for t4g instances" > ~/brain/INBOX/research.txt
 
-# Option B with Dropbox: drop files from any device into the INBOX folder
-# Option B without Dropbox: use SSH/ttyd or queue via ActingWeb
+# Option B: use SSH/ttyd, or queue via ActingWeb from any device
 ```
 
 After execution, files move to `INBOX/_processed/` with a date prefix.
@@ -327,9 +273,42 @@ This works in both Option A and Option B.
 | `agent.conf.example` | Configuration template — copy to `agent.conf` (Option B) |
 | `agent-cli.sh` | Agent CLI helper — status, logs, run commands (Option B) |
 | `setup.sh` | Bootstrap script — run on fresh Ubuntu instance (Option B) |
-| `agent-setup.sh` | Post-deploy setup — Dropbox, brain dir, MCP servers (Option B) |
+| `agent-setup.sh` | Post-deploy setup — brain dir, MCP servers (Option B) |
 | `agent-orchestrator.sh` | Main startup script — full task cycle (Option B) |
 | `deploy.sh` | One-command deploy — creates all AWS resources (Option B) |
 | `teardown.sh` | One-command teardown — destroys all AWS resources (Option B) |
 | `agent-manager.sh` | Local management — status, wakeup, sleep, mode switch, SSH (Option B) |
 | `deploy-scheduler.sh` | Create/remove EventBridge scheduler (used by agent-manager.sh) |
+| `setup-dropbox.sh` | Optional Dropbox sync setup (see below) |
+
+---
+
+## Optional: Syncing the Brain Directory
+
+By default, the brain directory lives locally on the server at `~/brain/`.
+You access files via SSH, the web terminal (ttyd), or ActingWeb tasks.
+
+If you want to sync the brain directory across devices, you have two options:
+
+### Git-managed brain
+
+Initialize the brain directory as a git repo and push/pull from a remote:
+
+```bash
+cd ~/brain
+git init && git add -A && git commit -m "Initial brain"
+git remote add origin <your-repo-url>
+git push -u origin main
+```
+
+This works well if you want version history and are comfortable with git.
+You can edit files locally and push, or pull on the server before a run.
+
+### Dropbox sync
+
+For automatic file sync (including from phone/tablet), you can set up Dropbox
+on the server using Maestral (a lightweight headless Dropbox client).
+
+See `setup-dropbox.sh` in this repo for a guided setup script. Note that
+Dropbox sync adds complexity (selective sync configuration, daemon management)
+and is not required for the agent to function.

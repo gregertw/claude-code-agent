@@ -32,21 +32,13 @@ fi
 # Apply defaults for optional fields
 SCHEDULE_MODE="${SCHEDULE_MODE:-always-on}"
 SCHEDULE_INTERVAL="${SCHEDULE_INTERVAL:-60}"
-FILE_SYNC="${FILE_SYNC:-dropbox}"
 INSTALL_TTYD="${INSTALL_TTYD:-false}"
 TTYD_USER="${TTYD_USER:-agent}"
 TTYD_PASSWORD="${TTYD_PASSWORD:-changeme}"
 UBUNTU_USER="${UBUNTU_USER:-ubuntu}"
-BRAIN_FOLDER="${BRAIN_FOLDER:-brain}"
 OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
 HOME_DIR="/home/${UBUNTU_USER}"
-
-# Derive brain directory path based on sync mode
-if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  BRAIN_DIR="${HOME_DIR}/Dropbox/${BRAIN_FOLDER}"
-else
-  BRAIN_DIR="${HOME_DIR}/brain"
-fi
+BRAIN_DIR="${HOME_DIR}/brain"
 
 # --- Colors ------------------------------------------------------------------
 RED='\033[0;31m'
@@ -68,7 +60,6 @@ log "Starting agent server bootstrap on $(hostname)..."
 log "Owner: ${OWNER_NAME}"
 log "Target user: ${UBUNTU_USER}"
 log "Schedule mode: ${SCHEDULE_MODE}"
-log "File sync: ${FILE_SYNC}"
 log "Brain directory: ${BRAIN_DIR}"
 
 # --- 1. System Update --------------------------------------------------------
@@ -166,9 +157,7 @@ sed -i 's/^#\?PubkeyAuthentication.*/PubkeyAuthentication yes/' /etc/ssh/sshd_co
 systemctl restart ssh
 log "SSH hardened — password auth disabled, root login disabled."
 
-# --- 7. (Node.js removed — install manually if needed for MCP servers) -------
-
-# --- 7b. Glow (terminal markdown renderer) -----------------------------------
+# --- 7. Glow (terminal markdown renderer) ------------------------------------
 log "Installing glow (terminal markdown renderer)..."
 mkdir -p /etc/apt/keyrings
 curl -fsSL https://repo.charm.sh/apt/gpg.key \
@@ -189,67 +178,17 @@ log "Installing Claude Code..."
 sudo -u "${UBUNTU_USER}" bash -c 'curl -fsSL https://claude.ai/install.sh | bash'
 log "Claude Code installed."
 
+# --- 10. Brain Directory -----------------------------------------------------
+log "Creating brain directory at ${BRAIN_DIR}..."
+sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/ai/instructions"
+sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/ai/scratchpad"
+sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/INBOX/_processed"
+sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/tasks"
+sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/logs"
+sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/research"
+sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/improvements"
 
-# --- 11. Maestral Dropbox Client (optional) -----------------------------------
-if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  log "Installing Maestral (lightweight Dropbox client)..."
-
-  # Install pipx if not present, then install Maestral
-  apt-get install -y -qq pipx
-  sudo -u "${UBUNTU_USER}" bash -c 'PIPX_HOME="${HOME}/.local/pipx" PIPX_BIN_DIR="${HOME}/.local/bin" pipx install maestral'
-
-  # Verify installation
-  MAESTRAL_BIN="${HOME_DIR}/.local/bin/maestral"
-  if [[ -x "${MAESTRAL_BIN}" ]]; then
-    log "Maestral installed: $(sudo -u "${UBUNTU_USER}" "${MAESTRAL_BIN}" --version 2>/dev/null || echo 'ok')"
-  else
-    err "Maestral installation failed. Check pipx output above."
-    exit 1
-  fi
-
-  # Enable linger so the user's systemd services start at boot
-  loginctl enable-linger "${UBUNTU_USER}"
-
-  # Create systemd user service for Maestral
-  SYSTEMD_USER_DIR="${HOME_DIR}/.config/systemd/user"
-  sudo -u "${UBUNTU_USER}" mkdir -p "${SYSTEMD_USER_DIR}"
-  cat > "${SYSTEMD_USER_DIR}/maestral.service" << EOF
-[Unit]
-Description=Maestral Dropbox Sync
-After=network-online.target
-Wants=network-online.target
-
-[Service]
-Type=notify
-ExecStart=${MAESTRAL_BIN} start -f
-ExecStop=${MAESTRAL_BIN} stop
-WatchdogSec=30
-Restart=on-failure
-RestartSec=10
-
-[Install]
-WantedBy=default.target
-EOF
-  chown -R "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/.config/systemd"
-
-  # NOTE: Do not enable/start service here — it needs account linking first.
-  # The agent-setup.sh script will link, configure selective sync, and start it.
-
-  log "Maestral installed (not started — requires account linking)."
-  log "Run ~/agent-setup.sh to link, configure selective sync, and install templates."
-else
-  log "File sync: none. Brain directory will be local at ${BRAIN_DIR}"
-  # Create the local brain directory structure
-  sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/ai/instructions"
-  sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/ai/scratchpad"
-  sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/INBOX/_processed"
-  sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/tasks"
-  sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/logs"
-  sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/research"
-  sudo -u "${UBUNTU_USER}" mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/improvements"
-fi
-
-# --- 12. ttyd Web Terminal (optional) ----------------------------------------
+# --- 11. ttyd Web Terminal (optional) ----------------------------------------
 if [[ "${INSTALL_TTYD}" == "true" ]]; then
   log "Installing ttyd (web terminal)..."
 
@@ -315,7 +254,7 @@ EOF
   fi
 fi
 
-# --- 13. Environment Setup ---------------------------------------------------
+# --- 12. Environment Setup ---------------------------------------------------
 log "Setting up environment..."
 
 # Create .env file for API keys
@@ -401,7 +340,7 @@ PROFILE_MOTD
   log "MOTD added to .profile."
 fi
 
-# --- 16. Claude Code Settings ------------------------------------------------
+# --- 13. Claude Code Settings ------------------------------------------------
 log "Configuring Claude Code permissions for autonomous mode..."
 CLAUDE_SETTINGS_DIR="${HOME_DIR}/.claude"
 sudo -u "${UBUNTU_USER}" mkdir -p "${CLAUDE_SETTINGS_DIR}"
@@ -418,7 +357,6 @@ sudo -u "${UBUNTU_USER}" tee "${CLAUDE_SETTINGS_DIR}/settings.json" > /dev/null 
       "Edit",
       "Glob",
       "Grep",
-      "Bash(maestral *)",
       "Bash(cat *)",
       "Bash(mkdir *)",
       "Bash(mv *)",
@@ -433,7 +371,7 @@ sudo -u "${UBUNTU_USER}" tee "${CLAUDE_SETTINGS_DIR}/settings.json" > /dev/null 
 SETTINGS
 log "Claude Code permissions configured."
 
-# --- 17. Agent Orchestrator --------------------------------------------------
+# --- 14. Agent Orchestrator --------------------------------------------------
 log "Installing agent orchestrator..."
 if [[ -f "${SCRIPT_DIR}/agent-orchestrator.sh" ]]; then
   cp "${SCRIPT_DIR}/agent-orchestrator.sh" "${HOME_DIR}/scripts/agent-orchestrator.sh"
@@ -473,17 +411,11 @@ chmod +x "${HOME_DIR}/scripts/run-agent.sh"
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/run-agent.sh"
 
 # Create systemd service for agent orchestrator
-# Network dependency only — Maestral runs as a user service which
-# system services cannot depend on. The orchestrator script handles
-# checking/starting Maestral itself.
-AFTER_DEPS="After=network-online.target"
-WANTS_DEPS="Wants=network-online.target"
-
 cat > /etc/systemd/system/agent-boot-runner.service << EOF
 [Unit]
 Description=Agent Orchestrator — runs tasks on boot
-${AFTER_DEPS}
-${WANTS_DEPS}
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=oneshot
@@ -507,7 +439,7 @@ else
   log "Boot runner DISABLED (always-on mode)."
 fi
 
-# --- 18. Schedule Mode Toggle Script ----------------------------------------
+# --- 15. Schedule Mode Toggle Script ----------------------------------------
 log "Creating schedule mode toggle..."
 cat > "${HOME_DIR}/scripts/set-schedule-mode.sh" << 'TOGGLE_SCRIPT'
 #!/usr/bin/env bash
@@ -542,7 +474,7 @@ TOGGLE_SCRIPT
 chmod +x "${HOME_DIR}/scripts/set-schedule-mode.sh"
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/set-schedule-mode.sh"
 
-# --- 19. Agent README -------------------------------------------------------
+# --- 16. Agent README -------------------------------------------------------
 log "Setting up agent infrastructure..."
 cat > "${HOME_DIR}/agents/README.md" << EOF
 # Agent Server — ${OWNER_NAME}
@@ -563,7 +495,7 @@ EOF
 
 chown -R "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/agents"
 
-# --- 19b. Agent CLI Helper ---------------------------------------------------
+# --- 17. Agent CLI Helper ---------------------------------------------------
 log "Installing agent CLI helper..."
 if [[ -f "${SCRIPT_DIR}/agent-cli.sh" ]]; then
   cp "${SCRIPT_DIR}/agent-cli.sh" "${HOME_DIR}/scripts/agent-cli.sh"
@@ -577,7 +509,7 @@ else
   warn "agent-cli.sh not found in ${SCRIPT_DIR}. Upload it manually."
 fi
 
-# --- 19c. Login Banner (MOTD) -----------------------------------------------
+# --- 18. Login Banner (MOTD) -----------------------------------------------
 log "Setting up login banner..."
 
 # Disable default Ubuntu MOTD noise
@@ -600,16 +532,9 @@ HOME_DIR="/home/ubuntu"
 source "${HOME_DIR}/.agent-server.conf" 2>/dev/null || true
 source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
 
-FILE_SYNC="${FILE_SYNC:-none}"
-BRAIN_FOLDER="${BRAIN_FOLDER:-brain}"
 OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
 OWNER_NAME="${OWNER_NAME:-Agent}"
-
-if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  BRAIN_DIR="${HOME_DIR}/Dropbox/${BRAIN_FOLDER}"
-else
-  BRAIN_DIR="${HOME_DIR}/brain"
-fi
+BRAIN_DIR="${HOME_DIR}/brain"
 OUTPUT_DIR="${BRAIN_DIR}/${OUTPUT_FOLDER}"
 
 echo ""
@@ -672,7 +597,7 @@ MOTD_SCRIPT
 chmod +x /etc/update-motd.d/99-agent-status
 log "Login banner installed."
 
-# --- 20. Install template files ----------------------------------------------
+# --- 19. Install template files ----------------------------------------------
 log "Installing template files..."
 
 # Copy agent-setup.sh (unified post-deploy setup)
@@ -683,37 +608,26 @@ if [[ -f "${SCRIPT_DIR}/agent-setup.sh" ]]; then
   log "agent-setup.sh copied to home directory."
 fi
 
-# Handle template installation based on sync mode
+# Install templates directly into brain directory
 TEMPLATES_DIR="${SCRIPT_DIR}/templates"
 if [[ -d "${TEMPLATES_DIR}" ]]; then
-  if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-    # Dropbox mode: stage templates for installation after Dropbox links
-    if [[ ! -d "${BRAIN_DIR}" ]]; then
-      log "Dropbox not linked yet. Templates staged for later installation."
-      sudo -u "${UBUNTU_USER}" mkdir -p "${HOME_DIR}/pending-templates"
-      cp -r "${TEMPLATES_DIR}"/* "${HOME_DIR}/pending-templates/"
-      chown -R "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/pending-templates"
+  log "Installing templates into brain directory..."
+  for f in "${TEMPLATES_DIR}"/*.md; do
+    BASENAME=$(basename "$f")
+    if [[ "$BASENAME" == "CLAUDE.md" ]]; then
+      TARGET="${BRAIN_DIR}/CLAUDE.md"
+    else
+      TARGET="${BRAIN_DIR}/ai/instructions/${BASENAME}"
     fi
-  else
-    # No-sync mode: install templates directly into local brain dir
-    log "Installing templates into local brain directory..."
-    for f in "${TEMPLATES_DIR}"/*.md; do
-      BASENAME=$(basename "$f")
-      if [[ "$BASENAME" == "CLAUDE.md" ]]; then
-        TARGET="${BRAIN_DIR}/CLAUDE.md"
-      else
-        TARGET="${BRAIN_DIR}/ai/instructions/${BASENAME}"
-      fi
-      if [[ ! -f "${TARGET}" ]]; then
-        cp "$f" "${TARGET}"
-        chown "${UBUNTU_USER}:${UBUNTU_USER}" "${TARGET}"
-        log "  Installed: ${TARGET}"
-      fi
-    done
-  fi
+    if [[ ! -f "${TARGET}" ]]; then
+      cp "$f" "${TARGET}"
+      chown "${UBUNTU_USER}:${UBUNTU_USER}" "${TARGET}"
+      log "  Installed: ${TARGET}"
+    fi
+  done
 fi
 
-# Create template installer script (useful for both modes)
+# Create template installer script (useful for re-installing)
 cat > "${HOME_DIR}/scripts/install-templates.sh" << INSTALL_TMPL
 #!/usr/bin/env bash
 # Install template files into the brain directory.
@@ -721,16 +635,7 @@ cat > "${HOME_DIR}/scripts/install-templates.sh" << INSTALL_TMPL
 
 set -euo pipefail
 
-source "\${HOME}/.agent-server.conf" 2>/dev/null || true
-FILE_SYNC="\${FILE_SYNC:-dropbox}"
-BRAIN_FOLDER="\${BRAIN_FOLDER:-brain}"
-OUTPUT_FOLDER="\${OUTPUT_FOLDER:-output}"
-
-if [[ "\${FILE_SYNC}" == "dropbox" ]]; then
-  BRAIN="\${HOME}/Dropbox/\${BRAIN_FOLDER}"
-else
-  BRAIN="\${HOME}/brain"
-fi
+BRAIN="\${HOME}/brain"
 
 # Try pending-templates first, fall back to agent-server/templates
 if [[ -d "\${HOME}/pending-templates" ]]; then
@@ -744,9 +649,11 @@ fi
 
 if [[ ! -d "\${BRAIN}" ]]; then
   echo "ERROR: \${BRAIN} not found."
-  [[ "\${FILE_SYNC}" == "dropbox" ]] && echo "Is Dropbox synced?"
   exit 1
 fi
+
+source "\${HOME}/.agent-server.conf" 2>/dev/null || true
+OUTPUT_FOLDER="\${OUTPUT_FOLDER:-output}"
 
 mkdir -p "\${BRAIN}/ai/instructions"
 mkdir -p "\${BRAIN}/INBOX/_processed"
@@ -777,7 +684,7 @@ INSTALL_TMPL
 chmod +x "${HOME_DIR}/scripts/install-templates.sh"
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/install-templates.sh"
 
-# --- 21. Tools Manifest ------------------------------------------------------
+# --- 20. Tools Manifest ------------------------------------------------------
 log "Writing tools manifest..."
 cat > "${HOME_DIR}/tools-manifest.txt" << MANIFEST
 # Agent Server Tools Manifest — $(date +%Y-%m-%d)
@@ -785,7 +692,6 @@ cat > "${HOME_DIR}/tools-manifest.txt" << MANIFEST
 # Instance: $(hostname) | Region: ${AWS_REGION:-eu-north-1}
 # Ubuntu: $(lsb_release -ds)
 # Schedule mode: ${SCHEDULE_MODE}
-# File sync: ${FILE_SYNC}
 # Brain dir: ${BRAIN_DIR}
 #
 # Core Tools:
@@ -794,7 +700,6 @@ git: $(git --version 2>/dev/null || echo "not installed")
 aws-cli: $(aws --version 2>/dev/null || echo "not installed")
 claude: installed (run 'claude --version' to check)
 glow: $(glow --version 2>/dev/null || echo "not installed")
-maestral: $(if [[ "${FILE_SYNC}" == "dropbox" ]]; then echo "installed (Dropbox sync via Maestral)"; else echo "not installed (FILE_SYNC=none)"; fi)
 ttyd: $(if [[ "${INSTALL_TTYD}" == "true" ]]; then echo "installed (HTTPS, port 443)"; else echo "not installed"; fi)
 tmux: $(tmux -V 2>/dev/null || echo "not installed")
 uv: installed (run 'uv --version' to check)
@@ -808,7 +713,6 @@ unattended-upgrades: enabled
 ssh: key-only, root disabled
 
 # Services:
-$(if [[ "${FILE_SYNC}" == "dropbox" ]]; then echo "maestral.service: enabled (systemd user service)"; fi)
 $(if [[ "${INSTALL_TTYD}" == "true" ]]; then echo "ttyd.service: enabled (HTTPS, port 443)"; fi)
 agent-boot-runner.service: $(systemctl is-enabled agent-boot-runner.service 2>/dev/null || echo "unknown")
 MANIFEST
@@ -824,7 +728,6 @@ echo "============================================================"
 echo ""
 echo "OWNER: ${OWNER_NAME}"
 echo "MODE: ${SCHEDULE_MODE}"
-echo "FILE SYNC: ${FILE_SYNC}"
 echo "BRAIN DIR: ${BRAIN_DIR}"
 echo ""
 echo "MANUAL STEPS REQUIRED:"
@@ -840,12 +743,7 @@ STEP=$((STEP + 1))
 
 echo "${STEP}. RUN POST-DEPLOY SETUP"
 echo "   ~/agent-setup.sh"
-echo "   (Handles Dropbox, brain directory, MCP servers, and verification)"
-echo ""
-STEP=$((STEP + 1))
-
-echo "${STEP}. ALLOCATE ELASTIC IP (in AWS Console)"
-echo "   EC2 -> Elastic IPs -> Allocate -> Associate with this instance"
+echo "   (Handles brain directory, MCP servers, and verification)"
 echo ""
 STEP=$((STEP + 1))
 

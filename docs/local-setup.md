@@ -14,7 +14,6 @@ its instructions, scratchpad, inbox, and outputs. For example:
 
 - `~/brain/` — simple default
 - `~/Documents/agent-brain/` — inside Documents
-- `~/Dropbox/brain/` — if you want Dropbox sync
 
 > **Tip**: The brain directory is also compatible with [Obsidian](https://obsidian.md),
 > a free knowledge management app. If you use Obsidian, you can open the brain

@@ -24,15 +24,8 @@ set -uo pipefail
 source "${HOME}/.agent-server.conf" 2>/dev/null || true
 source "${HOME}/.agent-schedule" 2>/dev/null || true
 
-FILE_SYNC="${FILE_SYNC:-none}"
-BRAIN_FOLDER="${BRAIN_FOLDER:-brain}"
 OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
-
-if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  BRAIN_DIR="${HOME}/Dropbox/${BRAIN_FOLDER}"
-else
-  BRAIN_DIR="${HOME}/brain"
-fi
+BRAIN_DIR="${HOME}/brain"
 
 LOG_DIR="${HOME}/logs"
 OUTPUT_DIR="${BRAIN_DIR}/${OUTPUT_FOLDER}"

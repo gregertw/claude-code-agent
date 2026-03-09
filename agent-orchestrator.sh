@@ -4,7 +4,7 @@
 # =============================================================================
 # This script runs at boot (scheduled mode) or manually (always-on mode).
 # It orchestrates the full agent cycle:
-#   1. Wait for Dropbox sync (if configured)
+#   1. Wait for network
 #   2. Run Claude Code with the master prompt that handles all task sources
 #   3. Write logs
 #   4. Self-stop if in scheduled mode
@@ -51,15 +51,8 @@ fi
 
 # Derive paths from config
 OWNER_NAME="${OWNER_NAME:-Agent}"
-BRAIN_FOLDER="${BRAIN_FOLDER:-brain}"
 OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
-FILE_SYNC="${FILE_SYNC:-dropbox}"
-
-if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  BRAIN_DIR="${HOME_DIR}/Dropbox/${BRAIN_FOLDER}"
-else
-  BRAIN_DIR="${HOME_DIR}/brain"
-fi
+BRAIN_DIR="${HOME_DIR}/brain"
 INBOX_DIR="${BRAIN_DIR}/INBOX"
 
 echo "Owner: ${OWNER_NAME}"
@@ -98,55 +91,7 @@ for i in $(seq 1 30); do
   sleep 2
 done
 
-# --- 2. Wait for Dropbox sync (if configured) --------------------------------
-if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  echo "Waiting for Dropbox sync..."
-
-  # Ensure Maestral daemon is running and not paused
-  MAESTRAL_FULL=$(maestral status 2>/dev/null || echo "")
-  if [[ -z "${MAESTRAL_FULL}" ]]; then
-    echo "  Maestral not running, starting..."
-    maestral start 2>/dev/null || true
-    sleep 3
-  fi
-  if maestral status 2>/dev/null | grep -qi "paused"; then
-    echo "  Maestral paused, resuming..."
-    maestral resume 2>/dev/null || true
-    sleep 2
-  fi
-
-  SYNC_TIMEOUT=180
-  SYNC_START=$(date +%s)
-  SEEN_UP_TO_DATE=false
-  while true; do
-    ELAPSED=$(( $(date +%s) - SYNC_START ))
-    if [[ $ELAPSED -ge $SYNC_TIMEOUT ]]; then
-      echo "WARNING: Dropbox sync timeout (${SYNC_TIMEOUT}s). Proceeding."
-      break
-    fi
-    # Extract just the Status field value
-    SYNC_STATUS=$(maestral status 2>/dev/null | grep -i "^Status" | awk '{$1=""; print $0}' | xargs || echo "not running")
-    if [[ "${SYNC_STATUS}" == *"Up to date"* ]]; then
-      if [[ "$SEEN_UP_TO_DATE" == true ]]; then
-        echo "Dropbox synced (confirmed stable)."
-        break
-      else
-        SEEN_UP_TO_DATE=true
-        echo "  Dropbox up to date — verifying stability..."
-        sleep 15
-        continue
-      fi
-    else
-      SEEN_UP_TO_DATE=false
-    fi
-    echo "  Dropbox: ${SYNC_STATUS} (${ELAPSED}s elapsed)"
-    sleep 10
-  done
-else
-  echo "File sync: none (local brain directory)."
-fi
-
-# --- 3. Ensure brain dir exists ----------------------------------------------
+# --- 2. Ensure brain dir exists ----------------------------------------------
 if [[ ! -d "${BRAIN_DIR}" ]]; then
   echo "ERROR: Brain directory not found at ${BRAIN_DIR}"
   exit 1
@@ -155,7 +100,7 @@ fi
 # Ensure INBOX and _processed dirs exist
 mkdir -p "${INBOX_DIR}/_processed" 2>/dev/null || true
 
-# --- 4. Build the master prompt ---------------------------------------------
+# --- 3. Build the master prompt ---------------------------------------------
 RUN_DATE=$(date '+%Y-%m-%d %H:%M')
 RUN_DATE_SHORT=$(date +%Y%m%d)
 
@@ -208,7 +153,7 @@ IMPORTANT RULES:
 - Be concise in logs. ${OWNER_NAME} will review them quickly.
 PROMPT_END
 
-# --- 5. Run Claude Code with the master prompt -------------------------------
+# --- 4. Run Claude Code with the master prompt -------------------------------
 echo ""
 echo "=== Handing control to Claude Code ==="
 echo "Working directory: ${BRAIN_DIR}"
@@ -223,9 +168,6 @@ ALLOWED_TOOLS=()
 # Core tools for file operations
 ALLOWED_TOOLS+=("Read" "Write" "Edit" "Glob" "Grep" "WebSearch" "WebFetch")
 ALLOWED_TOOLS+=("Bash(cat *)" "Bash(mkdir *)" "Bash(mv *)" "Bash(ls *)" "Bash(date *)")
-if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  ALLOWED_TOOLS+=("Bash(maestral *)")
-fi
 
 # MCP tools from Claude Code's config
 CLAUDE_CONFIG="${HOME_DIR}/.claude.json"
@@ -253,20 +195,12 @@ CLAUDE_EXIT=$?
 echo ""
 echo "=== Claude Code finished (exit code: ${CLAUDE_EXIT}) ==="
 
-# --- 6. Post-run: wait for Dropbox to sync output ---------------------------
-if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  echo "Waiting for Dropbox to sync outputs..."
-  sleep 30
-  FINAL_STATUS=$(maestral status 2>/dev/null | grep -i "^Status" | awk '{$1=""; print $0}' | xargs || echo "unknown")
-  echo "Dropbox status: ${FINAL_STATUS}"
-fi
-
-# --- 7. Copy run log to brain output/logs/ -----------------------------------
+# --- 5. Copy run log to brain output/logs/ -----------------------------------
 BRAIN_LOG_DIR="${BRAIN_DIR}/${OUTPUT_FOLDER}/logs"
 mkdir -p "${BRAIN_LOG_DIR}"
 cp "${RUN_LOG}" "${BRAIN_LOG_DIR}/" 2>/dev/null || true
 
-# --- 8. Write heartbeat file (for monitoring) ---------------------------------
+# --- 6. Write heartbeat file (for monitoring) ---------------------------------
 HEARTBEAT_FILE="${BRAIN_DIR}/${OUTPUT_FOLDER}/.agent-heartbeat"
 cat > "${HEARTBEAT_FILE}" << EOF
 last_run=$(date -u +%Y-%m-%dT%H:%M:%SZ)
@@ -274,7 +208,7 @@ exit_code=${CLAUDE_EXIT}
 log=${RUN_LOG}
 EOF
 
-# --- 9. Log cleanup (keep last 100 logs) ------------------------------------
+# --- 7. Log cleanup (keep last 100 logs) ------------------------------------
 LOG_COUNT=$(ls -1 "${LOG_DIR}"/agent-run-*.md 2>/dev/null | wc -l)
 if [[ ${LOG_COUNT} -gt 100 ]]; then
   echo "Cleaning old logs (keeping last 100)..."
@@ -282,7 +216,7 @@ if [[ ${LOG_COUNT} -gt 100 ]]; then
   ls -1t "${LOG_DIR}"/orchestrator-*.log | tail -n +101 | xargs rm -f
 fi
 
-# --- 10. Print status summary (paste-friendly for AI) -----------------------
+# --- 8. Print status summary (paste-friendly for AI) -----------------------
 echo ""
 echo "============================================================"
 echo "AGENT RUN COMPLETE"
@@ -300,10 +234,6 @@ if [[ -d "${INBOX_DIR}" ]]; then
 fi
 echo "Inbox remaining: ${INBOX_REMAINING}"
 
-if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  echo "Dropbox: ${FINAL_STATUS:-not checked}"
-fi
-
 if [[ ${CLAUDE_EXIT} -ne 0 ]]; then
   echo ""
   echo "WARNING: Claude Code exited with error code ${CLAUDE_EXIT}."
@@ -313,7 +243,7 @@ fi
 echo ""
 echo "============================================================"
 
-# --- 11. Self-stop (scheduled mode) -----------------------------------------
+# --- 9. Self-stop (scheduled mode) -----------------------------------------
 if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && "${NO_STOP}" != "--no-stop" ]]; then
   echo "Scheduled mode: shutting down instance in 10 seconds..."
   echo "(Cancel with: touch ~/agents/.keep-running)"

@@ -10,28 +10,14 @@
 OWNER_NAME="Your Name"
 
 # --- Paths -------------------------------------------------------------------
-# The brain directory is where the agent reads instructions and writes outputs.
-#
-# With Dropbox: the brain lives inside Dropbox and syncs automatically.
-#   BRAIN_FOLDER is the subfolder name inside ~/Dropbox/
-# Without Dropbox: the brain lives at ~/brain/ on the server.
-#   BRAIN_FOLDER is ignored; access is via SSH and ActingWeb only.
-BRAIN_FOLDER="brain"
-
 # Subfolder inside the brain where final outputs and documents go.
 # This is also where the INBOX folder lives.
 OUTPUT_FOLDER="output"
 
-# --- File Sync ---------------------------------------------------------------
-# "dropbox" — install and use Dropbox for file sync (default)
-# "none"    — no file sync; brain directory is local-only (~/brain/)
-#             Access files via SSH, ttyd web terminal, or ActingWeb
-FILE_SYNC="dropbox"
-
 # --- Web Terminal ------------------------------------------------------------
 # Install ttyd for browser-based terminal access? (true/false)
 # Provides a web terminal at https://<ip> with self-signed TLS certificate.
-# Useful as an alternative or supplement to SSH, especially without Dropbox.
+# Useful as an alternative or supplement to SSH.
 INSTALL_TTYD=false
 
 # Username and password for ttyd web terminal (required if INSTALL_TTYD=true)
