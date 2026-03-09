@@ -102,11 +102,17 @@ done
 if [[ "${FILE_SYNC}" == "dropbox" ]]; then
   echo "Waiting for Dropbox sync..."
 
-  # Ensure Maestral daemon is running
-  if ! maestral status &>/dev/null; then
+  # Ensure Maestral daemon is running and not paused
+  MAESTRAL_FULL=$(maestral status 2>/dev/null || echo "")
+  if [[ -z "${MAESTRAL_FULL}" ]]; then
     echo "  Maestral not running, starting..."
     maestral start 2>/dev/null || true
     sleep 3
+  fi
+  if maestral status 2>/dev/null | grep -qi "paused"; then
+    echo "  Maestral paused, resuming..."
+    maestral resume 2>/dev/null || true
+    sleep 2
   fi
 
   SYNC_TIMEOUT=180
@@ -118,23 +124,22 @@ if [[ "${FILE_SYNC}" == "dropbox" ]]; then
       echo "WARNING: Dropbox sync timeout (${SYNC_TIMEOUT}s). Proceeding."
       break
     fi
-    STATUS=$(maestral status 2>/dev/null || echo "not running")
-    if echo "${STATUS}" | grep -qi "up to date"; then
+    # Extract just the Status field value
+    SYNC_STATUS=$(maestral status 2>/dev/null | grep -i "^Status" | awk '{$1=""; print $0}' | xargs || echo "not running")
+    if [[ "${SYNC_STATUS}" == *"Up to date"* ]]; then
       if [[ "$SEEN_UP_TO_DATE" == true ]]; then
         echo "Dropbox synced (confirmed stable)."
         break
       else
         SEEN_UP_TO_DATE=true
-        echo "  Dropbox reports up to date. Verifying stability..."
+        echo "  Dropbox up to date — verifying stability..."
         sleep 15
         continue
       fi
     else
       SEEN_UP_TO_DATE=false
     fi
-    # Extract just the status line for display
-    STATUS_LINE=$(echo "${STATUS}" | grep -i "Status:" | head -1 || echo "${STATUS}")
-    echo "  Dropbox: ${STATUS_LINE} (${ELAPSED}s elapsed)"
+    echo "  Dropbox: ${SYNC_STATUS} (${ELAPSED}s elapsed)"
     sleep 10
   done
 else
@@ -252,7 +257,7 @@ echo "=== Claude Code finished (exit code: ${CLAUDE_EXIT}) ==="
 if [[ "${FILE_SYNC}" == "dropbox" ]]; then
   echo "Waiting for Dropbox to sync outputs..."
   sleep 30
-  FINAL_STATUS=$(maestral status 2>/dev/null | grep -i "Status:" | head -1 || echo "unknown")
+  FINAL_STATUS=$(maestral status 2>/dev/null | grep -i "^Status" | awk '{$1=""; print $0}' | xargs || echo "unknown")
   echo "Dropbox status: ${FINAL_STATUS}"
 fi
 

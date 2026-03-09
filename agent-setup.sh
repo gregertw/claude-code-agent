@@ -106,85 +106,126 @@ if [[ "${FILE_SYNC}" == "dropbox" ]]; then
     ok "Account linked successfully"
   fi
 
-  # 1b. Ensure Maestral daemon is running (auth link may have started it)
+  # 1b. Configure sync directory
+  CURRENT_PATH=$("${MAESTRAL_BIN}" config get path 2>/dev/null || true)
+  if [[ -n "${CURRENT_PATH}" && -d "${CURRENT_PATH}" ]]; then
+    ok "Sync directory: ${CURRENT_PATH}"
+  elif [[ "${VERIFY_ONLY}" == "true" ]]; then
+    need "Sync directory not configured"
+    ISSUES=$((ISSUES + 1))
+  else
+    log "Configuring sync directory..."
+    # Stop daemon if running (path changes require restart)
+    "${MAESTRAL_BIN}" stop 2>/dev/null || true
+    sleep 1
+
+    mkdir -p "${DROPBOX_DIR}"
+    "${MAESTRAL_BIN}" config set path "${DROPBOX_DIR}"
+    ok "Sync directory: ${DROPBOX_DIR}"
+  fi
+
+  # 1c. Start Maestral daemon (paused, so it doesn't sync before exclusions are set)
   MAESTRAL_RUNNING=false
+  NEEDS_EXCLUSIONS=false
   if "${MAESTRAL_BIN}" status 2>/dev/null | grep -qi "Status:"; then
     MAESTRAL_RUNNING=true
     ok "Maestral daemon running"
   elif [[ "${VERIFY_ONLY}" != "true" ]]; then
-    log "Starting Maestral daemon..."
-    # Try systemd user service first
-    systemctl --user daemon-reload 2>/dev/null || true
-    systemctl --user enable maestral.service 2>/dev/null || true
-    systemctl --user start maestral.service 2>/dev/null || true
+    log "Starting Maestral daemon (paused)..."
+    "${MAESTRAL_BIN}" start 2>/dev/null || true
     sleep 3
+    # Immediately pause to prevent syncing before exclusions are configured
+    "${MAESTRAL_BIN}" pause 2>/dev/null || true
+    NEEDS_EXCLUSIONS=true
 
     if "${MAESTRAL_BIN}" status 2>/dev/null | grep -qi "Status:"; then
       MAESTRAL_RUNNING=true
-      ok "Maestral started via systemd"
+      ok "Maestral started (paused for exclusion setup)"
     else
-      # Fallback: start directly
-      "${MAESTRAL_BIN}" start 2>/dev/null || true
-      sleep 3
-      if "${MAESTRAL_BIN}" status 2>/dev/null | grep -qi "Status:"; then
-        MAESTRAL_RUNNING=true
-        ok "Maestral started directly"
-      else
-        warn "Maestral failed to start"
-        ISSUES=$((ISSUES + 1))
-      fi
+      warn "Maestral failed to start"
+      ISSUES=$((ISSUES + 1))
     fi
   else
     need "Maestral not running"
     ISSUES=$((ISSUES + 1))
   fi
 
-  # 1c. Selective sync — exclude everything except brain folder
+  # 1d. Selective sync — exclude everything except brain folder
   # Uses maestral ls to query remote folders from the server BEFORE syncing them down.
   if [[ "${MAESTRAL_RUNNING}" == "true" ]]; then
 
     # Get current exclusion list
     EXCLUDED_LIST=$("${MAESTRAL_BIN}" excluded list 2>/dev/null || true)
 
-    # List remote top-level entries (queries Dropbox server, no local sync needed)
-    log "Querying Dropbox for folder listing..."
-    REMOTE_OUTPUT=$("${MAESTRAL_BIN}" ls 2>&1 || true)
-    echo "  Remote folders found:"
-    echo "${REMOTE_OUTPUT}" | head -20 | sed 's/^/    /'
+    # Check if exclusions are already configured
+    if echo "${EXCLUDED_LIST}" | grep -qi "excluded" && [[ "${NEEDS_EXCLUSIONS}" == "false" ]]; then
+      # "No excluded files or folders." contains "excluded", real entries don't
+      # So if grep matches, it means no exclusions exist yet
+      NEEDS_EXCLUSIONS=true
+    elif [[ "${NEEDS_EXCLUSIONS}" == "false" ]] && echo "${EXCLUDED_LIST}" | grep -q "/"; then
+      # Has exclusion entries (paths start with /)
+      EXCLUDED_COUNT=$(echo "${EXCLUDED_LIST}" | grep -c "/" || true)
+      ok "Selective sync configured (${EXCLUDED_COUNT} folder(s) excluded)"
+    fi
 
-    EXCLUDED=0
-    ALREADY_EXCLUDED=0
-    while IFS= read -r item; do
-      # Skip empty lines
-      [[ -z "$item" ]] && continue
-      # Strip whitespace and trailing slashes
-      item=$(echo "$item" | xargs | sed 's/\/$//')
-      [[ -z "$item" ]] && continue
-      # Skip the brain folder
-      [[ "${item,,}" == "${BRAIN_FOLDER,,}" ]] && continue
+    if [[ "${NEEDS_EXCLUSIONS}" == "true" || "${VERIFY_ONLY}" == "true" ]]; then
+      # List remote top-level entries (queries Dropbox server, no local sync needed)
+      log "Querying Dropbox for folder listing..."
+      REMOTE_OUTPUT=$("${MAESTRAL_BIN}" ls 2>&1 || true)
+      echo "  Remote folders found:"
+      echo "${REMOTE_OUTPUT}" | head -20 | sed 's/^/    /'
 
-      # Check if already excluded
-      if echo "${EXCLUDED_LIST}" | grep -qi "$item" 2>/dev/null; then
-        ALREADY_EXCLUDED=$((ALREADY_EXCLUDED + 1))
-      else
-        if "${MAESTRAL_BIN}" excluded add "$item" 2>&1; then
-          EXCLUDED=$((EXCLUDED + 1))
+      EXCLUDED=0
+      ALREADY_EXCLUDED=0
+      while IFS= read -r item; do
+        # Skip empty lines
+        [[ -z "$item" ]] && continue
+        # Strip whitespace and trailing slashes
+        item=$(echo "$item" | xargs | sed 's/\/$//')
+        [[ -z "$item" ]] && continue
+        # Skip the brain folder
+        [[ "${item,,}" == "${BRAIN_FOLDER,,}" ]] && continue
+
+        if [[ "${VERIFY_ONLY}" == "true" ]]; then
+          if ! echo "${EXCLUDED_LIST}" | grep -qi "$item" 2>/dev/null; then
+            need "Not excluded: $item"
+            ISSUES=$((ISSUES + 1))
+          fi
+        else
+          # Check if already excluded
+          if echo "${EXCLUDED_LIST}" | grep -qi "$item" 2>/dev/null; then
+            ALREADY_EXCLUDED=$((ALREADY_EXCLUDED + 1))
+          else
+            if "${MAESTRAL_BIN}" excluded add "$item" 2>&1; then
+              EXCLUDED=$((EXCLUDED + 1))
+            fi
+          fi
         fi
-      fi
-    done <<< "${REMOTE_OUTPUT}"
+      done <<< "${REMOTE_OUTPUT}"
 
-    if [[ $EXCLUDED -gt 0 ]]; then
-      ok "Excluded ${EXCLUDED} folder(s) from sync"
-    fi
-    if [[ $ALREADY_EXCLUDED -gt 0 ]]; then
-      skip "${ALREADY_EXCLUDED} folder(s) already excluded"
-    fi
-    if [[ $EXCLUDED -eq 0 && $ALREADY_EXCLUDED -eq 0 ]]; then
-      ok "Selective sync configured (only '${BRAIN_FOLDER}/' syncing)"
+      if [[ $EXCLUDED -gt 0 ]]; then
+        ok "Excluded ${EXCLUDED} folder(s) from sync"
+      fi
+      if [[ $ALREADY_EXCLUDED -gt 0 ]]; then
+        skip "${ALREADY_EXCLUDED} folder(s) already excluded"
+      fi
+      if [[ $EXCLUDED -eq 0 && $ALREADY_EXCLUDED -eq 0 && "${VERIFY_ONLY}" != "true" ]]; then
+        ok "Selective sync configured (only '${BRAIN_FOLDER}/' syncing)"
+      fi
     fi
   else
     warn "Skipping selective sync — Maestral not running"
     ISSUES=$((ISSUES + 1))
+  fi
+
+  # 1e. Resume sync (if we paused it for exclusion setup)
+  if [[ "${MAESTRAL_RUNNING}" == "true" ]]; then
+    if "${MAESTRAL_BIN}" status 2>/dev/null | grep -qi "paused"; then
+      log "Resuming sync..."
+      "${MAESTRAL_BIN}" resume 2>/dev/null || true
+      sleep 2
+      ok "Sync resumed"
+    fi
   fi
 
   echo ""
