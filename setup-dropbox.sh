@@ -143,7 +143,7 @@ fi
 # Show what's being synced
 echo ""
 log "Current exclusion list:"
-dropbox-cli exclude list
+dropbox-cli exclude list 2>/dev/null || warn "Could not list exclusions (dropbox-cli bug — harmless)."
 echo ""
 
 # --- Step 4: Create brain folder if it doesn't exist -------------------------
