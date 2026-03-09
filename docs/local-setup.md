@@ -67,18 +67,23 @@ Add the following MCP servers in Claude Desktop's settings (Settings → Connect
 No Google Cloud project or OAuth credentials needed — just add the URL and
 complete the Google sign-in when prompted.
 
-## Step 4: Open your brain folder in Cowork
+## Step 4: Start a new Cowork session in your brain folder
+
+**Important:** You need to start a **new** Cowork session pointed at the brain
+directory. The current session (if any) was used for setup — the new session
+will work inside your brain folder where CLAUDE.md lives.
 
 1. Open Claude Desktop
 2. Start a new **Cowork** session
-3. Choose **"Work in a folder"** and select your brain directory (e.g. `~/brain`)
+3. Choose **"Work in a folder"** and select your brain directory
 4. Claude will read the `CLAUDE.md` file automatically
 
-You're now working inside your agent workspace. Continue to Step 5.
+Then paste the prompt below into the new session. It will personalize the agent,
+verify MCP connections, and set up a recurring schedule.
 
-## Step 5: Personalize and set up schedule
+### Prompt to paste
 
-Send this prompt in your new Cowork session:
+Copy and paste this into your new Cowork session (no changes needed):
 
 ```txt
 Read the instruction files in ai/instructions/ and introduce yourself.
@@ -98,9 +103,6 @@ After personalization, wrap up by doing the following:
 3. Give me a summary of what the agent can do now — what default tasks are
    configured, how to queue one-off tasks, and how to customize.
 ```
-
-This verifies your setup works (MCP connection, file access), walks you through
-personalizing the templates, and sets you up to use the agent going forward.
 
 ---
 

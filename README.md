@@ -30,6 +30,11 @@ Based on their answer, open the corresponding guide:
 - Option B: Follow the AWS guided setup below.
 
 For Option A, follow the steps in `docs/local-setup.md` sequentially.
+When you reach Step 4, you MUST give the user an explicit, copy-pasteable
+block that tells them exactly:
+1. The full path to open in Cowork (the brain directory they chose)
+2. The exact prompt to paste in the new session (from the guide's Step 4)
+Do NOT paraphrase — output the actual prompt as a code block they can copy.
 
 ### AWS Guided Setup (Option B)
 
