@@ -169,7 +169,7 @@ ALLOWED_TOOLS=()
 ALLOWED_TOOLS+=("Read" "Write" "Edit" "Glob" "Grep" "WebSearch" "WebFetch")
 ALLOWED_TOOLS+=("Bash(cat *)" "Bash(mkdir *)" "Bash(mv *)" "Bash(ls *)" "Bash(date *)")
 
-# MCP tools from Claude Code's config
+# MCP tools from Claude Code's config (both local and cloud-synced servers)
 CLAUDE_CONFIG="${HOME_DIR}/.claude.json"
 if [[ -f "${CLAUDE_CONFIG}" ]]; then
   while IFS= read -r server; do
@@ -178,8 +178,15 @@ if [[ -f "${CLAUDE_CONFIG}" ]]; then
 import json
 with open('${CLAUDE_CONFIG}') as f:
     d = json.load(f)
+# Local MCP servers (registered via 'claude mcp add')
 for name in d.get('mcpServers', {}):
     print(name)
+# Cloud-synced MCP servers (claude.ai connectors)
+# These use tool names like 'mcp__claude_ai_ServerName' (spaces replaced with _)
+for name in d.get('claudeAiMcpEverConnected', []):
+    # Convert 'claude.ai ServerName' to 'claude_ai_ServerName'
+    sanitized = name.replace('.', '_').replace(' ', '_')
+    print(sanitized)
 " 2>/dev/null || true)
 fi
 

@@ -1,16 +1,19 @@
 #!/usr/bin/env bash
 # =============================================================================
-# Dropbox Setup — Link account and configure selective sync
+# Dropbox Setup — Optional sync for the brain directory via Maestral
 # =============================================================================
-# Run this on the server after setup.sh to:
-#   1. Link the Dropbox account (opens a URL to authorize)
-#   2. Configure selective sync so ONLY the brain folder syncs
-#   3. Create the brain folder if it doesn't exist
-#   4. Install template files
+# Run this on the server AFTER setup.sh and agent-setup.sh to add Dropbox sync.
+# All scripts use ~/brain as the brain directory. This script:
+#   1. Installs Maestral (lightweight headless Dropbox client)
+#   2. Links your Dropbox account
+#   3. Configures selective sync (only the brain folder syncs)
+#   4. Handles existing ~/brain content (migrate, skip, or start fresh)
+#   5. Symlinks ~/brain → ~/Dropbox/<brain-folder> so all scripts work unchanged
 #
-# Safe to re-run — skips linking if already linked, re-applies exclusions.
+# Safe to re-run — each step checks if it's already done.
 #
-# Usage: ~/setup-dropbox.sh
+# Usage: ~/setup-dropbox.sh [brain-folder-name]
+#   brain-folder-name: Dropbox subfolder to sync (default: "brain")
 # =============================================================================
 
 set -euo pipefail
@@ -19,213 +22,320 @@ set -euo pipefail
 RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
+CYAN='\033[0;36m'
+BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m'
 
 log()  { echo -e "${GREEN}[DROPBOX]${NC} $1"; }
 warn() { echo -e "${YELLOW}[NOTE]${NC} $1"; }
 err()  { echo -e "${RED}[ERROR]${NC} $1"; }
+ok()   { echo -e "  ${GREEN}✓${NC} $1"; }
 
-# --- Load configuration -----------------------------------------------------
-source "${HOME}/.agent-server.conf" 2>/dev/null || true
-BRAIN_FOLDER="${BRAIN_FOLDER:-brain}"
-
+BRAIN_FOLDER="${1:-brain}"
 DROPBOX_DIR="${HOME}/Dropbox"
-BRAIN_DIR="${DROPBOX_DIR}/${BRAIN_FOLDER}"
+BRAIN_DROPBOX="${DROPBOX_DIR}/${BRAIN_FOLDER}"
+BRAIN_LINK="${HOME}/brain"
+MAESTRAL_BIN="${HOME}/.local/bin/maestral"
+
+export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:/usr/local/bin:$PATH"
+
+echo ""
+echo -e "${BOLD}Dropbox Sync Setup${NC}"
+echo "════════════════════════════════════════"
+echo ""
+echo "Brain folder in Dropbox: ${BRAIN_FOLDER}/"
+echo "Local symlink:           ~/brain → ~/Dropbox/${BRAIN_FOLDER}"
+echo ""
 
 # =============================================================================
-# Step 1: Link account (skip if already linked)
+# Step 1: Install Maestral (if not present)
 # =============================================================================
-if [[ -d "${DROPBOX_DIR}" ]]; then
-  log "Dropbox is already linked (~/Dropbox exists)."
+echo -e "${BOLD}Step 1: Maestral${NC}"
+echo "────────────────────────────────────────"
+
+if command -v "${MAESTRAL_BIN}" &>/dev/null; then
+  ok "Maestral installed: $(${MAESTRAL_BIN} --version 2>/dev/null || echo 'ok')"
+else
+  log "Installing Maestral (lightweight Dropbox client)..."
+
+  # Install pipx if not present
+  if ! command -v pipx &>/dev/null; then
+    log "Installing pipx..."
+    sudo apt-get install -y -qq pipx 2>/dev/null || {
+      pip3 install --user pipx
+    }
+  fi
+
+  PIPX_HOME="${HOME}/.local/pipx" PIPX_BIN_DIR="${HOME}/.local/bin" pipx install maestral
+
+  if [[ -x "${MAESTRAL_BIN}" ]]; then
+    ok "Maestral installed"
+  else
+    err "Maestral installation failed."
+    exit 1
+  fi
+fi
+
+echo ""
+
+# =============================================================================
+# Step 2: Link Dropbox account
+# =============================================================================
+echo -e "${BOLD}Step 2: Link account${NC}"
+echo "────────────────────────────────────────"
+
+MAESTRAL_AUTH=$("${MAESTRAL_BIN}" auth status 2>/dev/null || true)
+if echo "${MAESTRAL_AUTH}" | grep -qi "linked"; then
+  LINKED_EMAIL=$(echo "${MAESTRAL_AUTH}" | grep -i "email" | sed 's/.*:[[:space:]]*//')
+  ok "Account linked (${LINKED_EMAIL})"
 else
   log "Linking Dropbox account..."
   echo ""
-  echo "============================================================"
-  echo "  Dropbox will print a URL. Open it in your browser and"
-  echo "  authorize this computer."
+  echo "  Maestral will print a URL. Open it in your browser,"
+  echo "  authorize the app, then paste the authorization code here."
   echo ""
-  echo "  Ignore the 'load fq extension' and deprecation warnings"
-  echo "  — they are normal."
-  echo ""
-  echo "  The script will continue automatically once linked."
-  echo "============================================================"
-  echo ""
-  read -r -p "Press Enter to start Dropbox linking..."
 
-  # Run dropboxd in background, tail output so the user sees the URL.
-  # Automatically detect the "linked" message and stop dropboxd.
-  LINK_LOG=$(mktemp /tmp/dropbox-link.XXXXXX)
-  "${HOME}/.dropbox-dist/dropboxd" > "${LINK_LOG}" 2>&1 &
-  DBPID=$!
-
-  tail -f "${LINK_LOG}" &
-  TAILPID=$!
-
-  # Wait for the "linked to Dropbox" message (timeout after 5 minutes)
-  LINK_TIMEOUT=300
-  LINK_START=$(date +%s)
-  LINKED=false
-  while true; do
-    ELAPSED=$(( $(date +%s) - LINK_START ))
-    if [[ $ELAPSED -ge $LINK_TIMEOUT ]]; then
-      break
-    fi
-    if grep -q "linked to Dropbox" "${LINK_LOG}" 2>/dev/null; then
-      LINKED=true
-      sleep 2  # let any final output appear
-      break
-    fi
-    sleep 1
-  done
-
-  # Stop tail and dropboxd
-  kill $TAILPID 2>/dev/null; wait $TAILPID 2>/dev/null || true
-  kill $DBPID 2>/dev/null; wait $DBPID 2>/dev/null || true
-  rm -f "${LINK_LOG}"
-
-  if [[ "${LINKED}" != "true" ]]; then
-    err "Dropbox linking timed out after ${LINK_TIMEOUT}s."
-    echo "  Try running ~/setup-dropbox.sh again."
+  "${MAESTRAL_BIN}" auth link
+  LINK_EXIT=$?
+  if [[ $LINK_EXIT -ne 0 ]]; then
+    err "Linking failed (exit code ${LINK_EXIT}). Try again."
     exit 1
   fi
-
-  log "Account linked successfully."
+  ok "Account linked"
 fi
 
-# =============================================================================
-# Step 2: Stop Dropbox before configuring exclusions
-# =============================================================================
-# Exclusions must be applied while Dropbox is running (it's an API call to
-# the daemon). But we need to stop it first to prevent it from syncing
-# everything, then start it briefly just for the exclude commands, then
-# restart cleanly.
-log "Stopping Dropbox to configure selective sync..."
-sudo systemctl stop dropbox 2>/dev/null || true
-# Also kill any stray dropboxd processes
-pkill -f dropboxd 2>/dev/null || true
-sleep 2
+echo ""
 
 # =============================================================================
-# Step 3: Start Dropbox briefly, apply exclusions immediately, then restart
+# Step 3: Configure sync directory and selective sync
 # =============================================================================
-log "Starting Dropbox daemon for exclusion configuration..."
-"${HOME}/.dropbox-dist/dropboxd" > /dev/null 2>&1 &
-DBPID=$!
+echo -e "${BOLD}Step 3: Selective sync${NC}"
+echo "────────────────────────────────────────"
 
-# Wait for the daemon to be responsive
-for i in $(seq 1 15); do
-  if dropbox-cli status 2>/dev/null | grep -qv "isn't running"; then
-    break
-  fi
+# 3a. Set sync directory
+CURRENT_PATH=$("${MAESTRAL_BIN}" config get path 2>/dev/null || true)
+if [[ "${CURRENT_PATH}" == "${DROPBOX_DIR}" ]]; then
+  ok "Sync directory: ${DROPBOX_DIR}"
+else
+  log "Configuring sync directory..."
+  "${MAESTRAL_BIN}" stop 2>/dev/null || true
   sleep 1
-done
+  mkdir -p "${DROPBOX_DIR}"
+  "${MAESTRAL_BIN}" config set path "${DROPBOX_DIR}"
+  ok "Sync directory: ${DROPBOX_DIR}"
+fi
 
-# Wait for ~/Dropbox to appear
-log "Waiting for ~/Dropbox/..."
-for i in $(seq 1 30); do
-  if [[ -d "${DROPBOX_DIR}" ]]; then
-    break
-  fi
-  if [[ $i -eq 30 ]]; then
-    err "~/Dropbox/ did not appear after 30 seconds."
-    kill $DBPID 2>/dev/null || true
+# 3b. Start daemon (paused) for exclusion setup
+MAESTRAL_RUNNING=false
+if "${MAESTRAL_BIN}" status 2>/dev/null | grep -qi "^Status"; then
+  MAESTRAL_RUNNING=true
+  # Pause if running so we can apply exclusions safely
+  "${MAESTRAL_BIN}" pause 2>/dev/null || true
+  ok "Maestral daemon running (paused for exclusion setup)"
+else
+  log "Starting Maestral daemon (paused)..."
+  "${MAESTRAL_BIN}" start 2>/dev/null || true
+  sleep 3
+  "${MAESTRAL_BIN}" pause 2>/dev/null || true
+  if "${MAESTRAL_BIN}" status 2>/dev/null | grep -qi "^Status"; then
+    MAESTRAL_RUNNING=true
+    ok "Maestral started (paused)"
+  else
+    err "Maestral failed to start. Check: maestral status"
     exit 1
   fi
-  sleep 1
-done
-log "~/Dropbox/ exists."
+fi
 
-# Give Dropbox a moment to populate the top-level folder list
-sleep 5
-
-# --- Apply exclusions: exclude everything except brain folder ----------------
-log "Configuring selective sync (only syncing '${BRAIN_FOLDER}/')..."
+# 3c. Apply exclusions — exclude everything except brain folder
+log "Querying Dropbox for folder listing..."
+REMOTE_OUTPUT=$("${MAESTRAL_BIN}" ls 2>&1 || true)
+echo "  Remote folders found:"
+echo "${REMOTE_OUTPUT}" | head -20 | sed 's/^/    /'
 
 EXCLUDED=0
-for dir in "${DROPBOX_DIR}"/*/; do
-  [[ ! -d "$dir" ]] && continue
-  dirname=$(basename "$dir")
-  if [[ "$dirname" != "${BRAIN_FOLDER}" ]]; then
-    dropbox-cli exclude add "$dir" >/dev/null 2>&1 || true
+while IFS= read -r item; do
+  [[ -z "$item" ]] && continue
+  item=$(echo "$item" | xargs | sed 's/\/$//')
+  [[ -z "$item" ]] && continue
+  # Skip the brain folder — that's the one we want to sync
+  [[ "${item,,}" == "${BRAIN_FOLDER,,}" ]] && continue
+  if "${MAESTRAL_BIN}" excluded add "$item" 2>/dev/null; then
     EXCLUDED=$((EXCLUDED + 1))
   fi
-done
+done <<< "${REMOTE_OUTPUT}"
 
 if [[ $EXCLUDED -gt 0 ]]; then
-  log "Excluded ${EXCLUDED} folder(s) from sync."
+  ok "Excluded ${EXCLUDED} folder(s) — only '${BRAIN_FOLDER}/' will sync"
 else
-  log "No other folders to exclude."
+  ok "Selective sync configured (only '${BRAIN_FOLDER}/' syncing)"
 fi
 
 echo ""
-log "Current exclusion list:"
-dropbox-cli exclude list 2>/dev/null || warn "Could not list exclusions (dropbox-cli bug — harmless)."
-echo ""
 
-# Stop the temporary daemon
-log "Stopping temporary daemon..."
-kill $DBPID 2>/dev/null; wait $DBPID 2>/dev/null || true
-pkill -f dropboxd 2>/dev/null || true
-sleep 2
+# =============================================================================
+# Step 4: Handle existing ~/brain content
+# =============================================================================
+echo -e "${BOLD}Step 4: Brain directory${NC}"
+echo "────────────────────────────────────────"
 
-# Clean up any excluded folders that were already synced
-log "Cleaning up excluded folders that were already downloaded..."
-CLEANED=0
-for dir in "${DROPBOX_DIR}"/*/; do
-  [[ ! -d "$dir" ]] && continue
-  dirname=$(basename "$dir")
-  if [[ "$dirname" != "${BRAIN_FOLDER}" ]]; then
-    rm -rf "$dir"
-    CLEANED=$((CLEANED + 1))
+if [[ -L "${BRAIN_LINK}" ]]; then
+  # Already a symlink
+  LINK_TARGET=$(readlink -f "${BRAIN_LINK}")
+  if [[ "${LINK_TARGET}" == "${BRAIN_DROPBOX}" ]]; then
+    ok "~/brain is already symlinked to ~/Dropbox/${BRAIN_FOLDER}"
+  else
+    warn "~/brain is a symlink to ${LINK_TARGET} (expected ${BRAIN_DROPBOX})"
+    echo ""
+    echo "  Options:"
+    echo "    1) Repoint symlink to ~/Dropbox/${BRAIN_FOLDER}"
+    echo "    2) Abort — fix manually"
+    echo ""
+    read -r -p "  Choose [1/2]: " CHOICE
+    case "${CHOICE}" in
+      1)
+        rm "${BRAIN_LINK}"
+        ln -s "${BRAIN_DROPBOX}" "${BRAIN_LINK}"
+        ok "Symlink updated: ~/brain → ~/Dropbox/${BRAIN_FOLDER}"
+        ;;
+      *)
+        echo "  Aborted. Fix ~/brain manually, then re-run this script."
+        exit 1
+        ;;
+    esac
   fi
-done
-if [[ $CLEANED -gt 0 ]]; then
-  log "Removed ${CLEANED} excluded folder(s)."
-fi
-
-# =============================================================================
-# Step 4: Create brain folder if it doesn't exist
-# =============================================================================
-if [[ ! -d "${BRAIN_DIR}" ]]; then
-  log "Brain folder '${BRAIN_FOLDER}/' not found. Creating it..."
-  mkdir -p "${BRAIN_DIR}"
-fi
-
-# =============================================================================
-# Step 5: Install template files
-# =============================================================================
-if [[ -x "${HOME}/scripts/install-templates.sh" ]]; then
-  log "Installing template files into ${BRAIN_DIR}..."
-  "${HOME}/scripts/install-templates.sh"
+elif [[ -d "${BRAIN_LINK}" ]]; then
+  # ~/brain is a real directory with content
+  BRAIN_FILES=$(find "${BRAIN_LINK}" -type f 2>/dev/null | wc -l | tr -d ' ')
+  echo ""
+  echo "  ~/brain exists as a directory (${BRAIN_FILES} file(s))."
+  echo ""
+  echo "  Options:"
+  echo "    1) Migrate — move ~/brain content into ~/Dropbox/${BRAIN_FOLDER}, then symlink"
+  echo "    2) Skip — don't touch ~/brain content (Dropbox brain already has content)"
+  echo "       This will back up ~/brain to ~/brain.bak and create the symlink."
+  echo "    3) Abort — do nothing, fix manually"
+  echo ""
+  read -r -p "  Choose [1/2/3]: " CHOICE
+  case "${CHOICE}" in
+    1)
+      log "Migrating ~/brain → ~/Dropbox/${BRAIN_FOLDER}..."
+      mkdir -p "${BRAIN_DROPBOX}"
+      # Copy content preserving structure (don't overwrite existing Dropbox files)
+      cp -rn "${BRAIN_LINK}/"* "${BRAIN_DROPBOX}/" 2>/dev/null || true
+      cp -rn "${BRAIN_LINK}/".[!.]* "${BRAIN_DROPBOX}/" 2>/dev/null || true
+      # Back up original and create symlink
+      mv "${BRAIN_LINK}" "${BRAIN_LINK}.bak"
+      ln -s "${BRAIN_DROPBOX}" "${BRAIN_LINK}"
+      ok "Content migrated. Original backed up to ~/brain.bak"
+      ok "Symlink: ~/brain → ~/Dropbox/${BRAIN_FOLDER}"
+      ;;
+    2)
+      log "Backing up ~/brain to ~/brain.bak..."
+      mv "${BRAIN_LINK}" "${BRAIN_LINK}.bak"
+      mkdir -p "${BRAIN_DROPBOX}"
+      ln -s "${BRAIN_DROPBOX}" "${BRAIN_LINK}"
+      ok "Original backed up to ~/brain.bak"
+      ok "Symlink: ~/brain → ~/Dropbox/${BRAIN_FOLDER}"
+      ;;
+    *)
+      echo "  Aborted. Re-run this script when ready."
+      exit 1
+      ;;
+  esac
 else
-  warn "install-templates.sh not found. Templates not installed."
+  # ~/brain doesn't exist — create Dropbox folder and symlink
+  mkdir -p "${BRAIN_DROPBOX}"
+  ln -s "${BRAIN_DROPBOX}" "${BRAIN_LINK}"
+  ok "Created: ~/brain → ~/Dropbox/${BRAIN_FOLDER}"
+fi
+
+# Ensure brain has the expected directory structure
+mkdir -p "${BRAIN_LINK}/ai/instructions" 2>/dev/null || true
+mkdir -p "${BRAIN_LINK}/ai/scratchpad" 2>/dev/null || true
+mkdir -p "${BRAIN_LINK}/INBOX/_processed" 2>/dev/null || true
+mkdir -p "${BRAIN_LINK}/output/tasks" 2>/dev/null || true
+mkdir -p "${BRAIN_LINK}/output/logs" 2>/dev/null || true
+mkdir -p "${BRAIN_LINK}/output/research" 2>/dev/null || true
+mkdir -p "${BRAIN_LINK}/output/improvements" 2>/dev/null || true
+
+echo ""
+
+# =============================================================================
+# Step 5: Resume sync
+# =============================================================================
+echo -e "${BOLD}Step 5: Start sync${NC}"
+echo "────────────────────────────────────────"
+
+log "Resuming Maestral sync..."
+if ! "${MAESTRAL_BIN}" resume 2>&1; then
+  warn "Resume failed, trying stop + start..."
+  "${MAESTRAL_BIN}" stop 2>/dev/null || true
+  sleep 2
+  "${MAESTRAL_BIN}" start 2>/dev/null || true
+  sleep 3
+fi
+
+SYNC_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null | grep -i "^Status" | awk '{$1=""; print $0}' | xargs || echo "unknown")
+ok "Maestral status: ${SYNC_STATUS}"
+
+echo ""
+
+# =============================================================================
+# Step 6: Create systemd user service (optional — for auto-start on boot)
+# =============================================================================
+SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
+SERVICE_FILE="${SYSTEMD_USER_DIR}/maestral.service"
+
+if [[ ! -f "${SERVICE_FILE}" ]]; then
+  echo -e "${BOLD}Step 6: Auto-start service${NC}"
+  echo "────────────────────────────────────────"
+
+  mkdir -p "${SYSTEMD_USER_DIR}"
+  cat > "${SERVICE_FILE}" << EOF
+[Unit]
+Description=Maestral Dropbox Sync
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+ExecStart=${MAESTRAL_BIN} start -f
+ExecStop=${MAESTRAL_BIN} stop
+WatchdogSec=30
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target
+EOF
+
+  systemctl --user daemon-reload
+  systemctl --user enable maestral.service
+  ok "Maestral systemd service installed and enabled"
+
+  # Enable linger so user services start at boot without login
+  if command -v loginctl &>/dev/null; then
+    sudo loginctl enable-linger "$(whoami)" 2>/dev/null || true
+  fi
+
+  echo ""
 fi
 
 # =============================================================================
-# Step 6: Enable and start Dropbox service (with exclusions applied)
+# Summary
 # =============================================================================
-log "Starting Dropbox service (with exclusions applied)..."
-sudo systemctl enable dropbox.service 2>/dev/null || true
-sudo systemctl start dropbox
-
-# Wait briefly and show status
-sleep 3
+echo "════════════════════════════════════════"
+echo -e "${GREEN}Dropbox sync configured.${NC}"
 echo ""
-log "Dropbox status:"
-dropbox-cli status 2>/dev/null || true
+echo "  Brain:      ~/brain → ~/Dropbox/${BRAIN_FOLDER}"
+echo "  Sync:       Only '${BRAIN_FOLDER}/' syncs (everything else excluded)"
+echo "  Status:     ${SYNC_STATUS}"
 echo ""
-log "Brain directory: ${BRAIN_DIR}"
-if [[ -d "${BRAIN_DIR}" ]]; then
-  log "Contents:"
-  ls -la "${BRAIN_DIR}/"
-fi
-
+echo "  Check sync: maestral status"
+echo "  View files: ls ~/brain/"
+echo "  Exclusions: maestral excluded list"
 echo ""
-echo "============================================================"
-echo -e "${GREEN} DROPBOX SETUP COMPLETE ${NC}"
-echo "============================================================"
+echo "  All agent scripts continue to use ~/brain — no config changes needed."
 echo ""
-echo "Only '${BRAIN_FOLDER}/' is syncing. Everything else is excluded."
-echo "To check sync status: dropbox-cli status"
-echo "To see exclusions:    dropbox-cli exclude list"
-echo "============================================================"
+echo "════════════════════════════════════════"

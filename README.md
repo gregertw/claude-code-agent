@@ -314,6 +314,10 @@ You can edit files locally and push, or pull on the server before a run.
 For automatic file sync (including from phone/tablet), you can set up Dropbox
 on the server using Maestral (a lightweight headless Dropbox client).
 
-See `setup-dropbox.sh` in this repo for a guided setup script. Note that
-Dropbox sync adds complexity (selective sync configuration, daemon management)
-and is not required for the agent to function.
+Run `setup-dropbox.sh` on the server — it installs Maestral, links your account,
+configures selective sync, and symlinks `~/brain → ~/Dropbox/brain` so all
+scripts work unchanged. If `~/brain` already has content, it offers to migrate
+or back up.
+
+Note that Dropbox sync adds complexity and is not required for the agent to
+function.
