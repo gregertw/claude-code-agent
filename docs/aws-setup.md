@@ -163,7 +163,8 @@ then come back here.
 # On your LOCAL machine — connect with MCP port forwarding:
 ./agent-manager.sh --ssh-mcp
 
-# Start Claude Code:
+# Change to the brain directory first:
+cd ~/Dropbox/brain    # or ~/brain if not using Dropbox
 claude
 # On first run, Claude Code asks for light/dark theme and then
 # authentication (API key or account login). Complete that first.

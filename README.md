@@ -112,8 +112,13 @@ If not already connected, tell the user to SSH in with MCP port forwarding
 ```
 Or: `ssh -L 18850:127.0.0.1:18850 -L 18851:127.0.0.1:18851 -L 18852:127.0.0.1:18852 agent`
 
-Then run Claude Code interactively:
+Then change to the brain directory and run Claude Code interactively.
+The path depends on the user's `agent.conf` settings:
+- With Dropbox: `cd ~/Dropbox/<BRAIN_FOLDER>` (default: `~/Dropbox/brain`)
+- Without Dropbox: `cd ~/brain`
+
 ```
+cd ~/Dropbox/brain
 claude
 ```
 
