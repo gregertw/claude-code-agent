@@ -362,8 +362,10 @@ fi
 POST_STEPS=""
 STEP_NUM=1
 
+POST_STEPS="${POST_STEPS}\n   Use SSH for all setup steps (not the web terminal) — OAuth needs port forwarding.\n"
+
 if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Link Dropbox: ./agent-manager.sh --ssh, then ~/setup-dropbox.sh"
+  POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Link Dropbox: ssh agent, then ~/setup-dropbox.sh"
   STEP_NUM=$((STEP_NUM + 1))
 fi
 
@@ -379,6 +381,10 @@ POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Authenticate MCP servers: /mcp in Claude
 STEP_NUM=$((STEP_NUM + 1))
 
 POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Test the orchestrator: ~/scripts/agent-orchestrator.sh --no-stop"
+
+if [[ "${INSTALL_TTYD}" == "true" ]]; then
+  POST_STEPS="${POST_STEPS}\n\n   After setup, use the web terminal at https://${ELASTIC_IP} for day-to-day access."
+fi
 
 echo ""
 echo "============================================================"

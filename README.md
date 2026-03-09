@@ -80,10 +80,16 @@ Then guide the user through each remaining step below.
 
 Skip this step if not using Dropbox.
 
-Tell the user to connect to the server using `agent-manager.sh`:
+**Important:** All setup steps (B5–B8) require SSH — not the web terminal
+(ttyd). SSH port forwarding is needed for OAuth authentication in B6/B7.
+After setup is complete, the web terminal works for day-to-day use.
+
+Tell the user to connect to the server:
 ```
 ./agent-manager.sh --ssh
 ```
+Or: `ssh agent`
+
 Then run the Dropbox setup:
 ```
 ~/setup-dropbox.sh
@@ -99,10 +105,12 @@ is normal. After the script finishes, tell them to type `exit` to disconnect.
 
 #### B6: Authenticate Claude Code on the server
 
-Tell the user to connect with MCP port forwarding (needed for OAuth):
+If not already connected, tell the user to SSH in with MCP port forwarding
+(needed for OAuth — the web terminal will not work for this step):
 ```
 ./agent-manager.sh --ssh-mcp
 ```
+Or: `ssh -L 18850:127.0.0.1:18850 -L 18851:127.0.0.1:18851 -L 18852:127.0.0.1:18852 agent`
 
 Then run Claude Code interactively:
 ```
@@ -144,6 +152,10 @@ This runs a full agent cycle without self-stopping. Check the output for
 errors. If everything works, the agent is ready.
 
 Tell the user to type `exit` to disconnect from the server.
+
+If ttyd was enabled, let the user know they can now use the web terminal
+at `https://<elastic-ip>` for day-to-day access (viewing logs, running
+tasks, editing files). SSH is only needed for OAuth re-authentication.
 
 #### B9: Personalize (optional)
 
