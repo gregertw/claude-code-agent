@@ -8,6 +8,8 @@
 #   3. Create the brain folder if it doesn't exist
 #   4. Install template files
 #
+# Safe to re-run — skips linking if already linked, re-applies exclusions.
+#
 # Usage: ~/setup-dropbox.sh
 # =============================================================================
 
@@ -30,19 +32,12 @@ BRAIN_FOLDER="${BRAIN_FOLDER:-brain}"
 DROPBOX_DIR="${HOME}/Dropbox"
 BRAIN_DIR="${DROPBOX_DIR}/${BRAIN_FOLDER}"
 
-# --- Check if already linked ------------------------------------------------
-# Dropbox is linked if ~/Dropbox exists (created on first successful link).
-# The service may or may not be running yet.
+# =============================================================================
+# Step 1: Link account (skip if already linked)
+# =============================================================================
 if [[ -d "${DROPBOX_DIR}" ]]; then
   log "Dropbox is already linked (~/Dropbox exists)."
-  # Make sure the service is enabled and running
-  if ! systemctl is-active --quiet dropbox.service 2>/dev/null; then
-    log "Starting Dropbox service..."
-    sudo systemctl enable dropbox.service 2>/dev/null || true
-    sudo systemctl start dropbox 2>/dev/null || true
-  fi
 else
-  # --- Step 1: Link account --------------------------------------------------
   log "Linking Dropbox account..."
   echo ""
   echo "============================================================"
@@ -57,13 +52,12 @@ else
   echo ""
   read -r -p "Press Enter to start Dropbox linking..."
 
-  # Run dropboxd in a subshell, piping output so we can detect the
-  # "linked" message and stop it automatically (no Ctrl-C needed).
+  # Run dropboxd in background, tail output so the user sees the URL.
+  # Automatically detect the "linked" message and stop dropboxd.
   LINK_LOG=$(mktemp /tmp/dropbox-link.XXXXXX)
   "${HOME}/.dropbox-dist/dropboxd" > "${LINK_LOG}" 2>&1 &
   DBPID=$!
 
-  # Tail the log so the user can see the URL and status messages
   tail -f "${LINK_LOG}" &
   TAILPID=$!
 
@@ -84,7 +78,7 @@ else
     sleep 1
   done
 
-  # Stop the tail and dropboxd
+  # Stop tail and dropboxd
   kill $TAILPID 2>/dev/null; wait $TAILPID 2>/dev/null || true
   kill $DBPID 2>/dev/null; wait $DBPID 2>/dev/null || true
   rm -f "${LINK_LOG}"
@@ -96,22 +90,45 @@ else
   fi
 
   log "Account linked successfully."
-
-  echo ""
-  log "Enabling and starting Dropbox service..."
-  sudo systemctl enable dropbox.service
-  sudo systemctl start dropbox
 fi
 
-# --- Step 2: Wait for ~/Dropbox to appear -----------------------------------
-log "Waiting for Dropbox to create ~/Dropbox/..."
+# =============================================================================
+# Step 2: Stop Dropbox before configuring exclusions
+# =============================================================================
+# Exclusions must be applied while Dropbox is running (it's an API call to
+# the daemon). But we need to stop it first to prevent it from syncing
+# everything, then start it briefly just for the exclude commands, then
+# restart cleanly.
+log "Stopping Dropbox to configure selective sync..."
+sudo systemctl stop dropbox 2>/dev/null || true
+# Also kill any stray dropboxd processes
+pkill -f dropboxd 2>/dev/null || true
+sleep 2
+
+# =============================================================================
+# Step 3: Start Dropbox briefly, apply exclusions immediately, then restart
+# =============================================================================
+log "Starting Dropbox daemon for exclusion configuration..."
+"${HOME}/.dropbox-dist/dropboxd" > /dev/null 2>&1 &
+DBPID=$!
+
+# Wait for the daemon to be responsive
+for i in $(seq 1 15); do
+  if dropbox-cli status 2>/dev/null | grep -qv "isn't running"; then
+    break
+  fi
+  sleep 1
+done
+
+# Wait for ~/Dropbox to appear
+log "Waiting for ~/Dropbox/..."
 for i in $(seq 1 30); do
   if [[ -d "${DROPBOX_DIR}" ]]; then
     break
   fi
   if [[ $i -eq 30 ]]; then
     err "~/Dropbox/ did not appear after 30 seconds."
-    echo "  Check: dropbox-cli status"
+    kill $DBPID 2>/dev/null || true
     exit 1
   fi
   sleep 1
@@ -119,9 +136,9 @@ done
 log "~/Dropbox/ exists."
 
 # Give Dropbox a moment to populate the top-level folder list
-sleep 3
+sleep 5
 
-# --- Step 3: Selective sync — exclude everything except brain ----------------
+# --- Apply exclusions: exclude everything except brain folder ----------------
 log "Configuring selective sync (only syncing '${BRAIN_FOLDER}/')..."
 
 EXCLUDED=0
@@ -129,7 +146,7 @@ for dir in "${DROPBOX_DIR}"/*/; do
   [[ ! -d "$dir" ]] && continue
   dirname=$(basename "$dir")
   if [[ "$dirname" != "${BRAIN_FOLDER}" ]]; then
-    dropbox-cli exclude add "$dir" >/dev/null 2>&1
+    dropbox-cli exclude add "$dir" >/dev/null 2>&1 || true
     EXCLUDED=$((EXCLUDED + 1))
   fi
 done
@@ -140,21 +157,43 @@ else
   log "No other folders to exclude."
 fi
 
-# Show what's being synced
 echo ""
 log "Current exclusion list:"
 dropbox-cli exclude list 2>/dev/null || warn "Could not list exclusions (dropbox-cli bug — harmless)."
 echo ""
 
-# --- Step 4: Create brain folder if it doesn't exist -------------------------
-if [[ ! -d "${BRAIN_DIR}" ]]; then
-  log "Brain folder '${BRAIN_FOLDER}/' not found in Dropbox. Creating it..."
-  mkdir -p "${BRAIN_DIR}"
-  # Give Dropbox a moment to sync the new folder
-  sleep 2
+# Stop the temporary daemon
+log "Stopping temporary daemon..."
+kill $DBPID 2>/dev/null; wait $DBPID 2>/dev/null || true
+pkill -f dropboxd 2>/dev/null || true
+sleep 2
+
+# Clean up any excluded folders that were already synced
+log "Cleaning up excluded folders that were already downloaded..."
+CLEANED=0
+for dir in "${DROPBOX_DIR}"/*/; do
+  [[ ! -d "$dir" ]] && continue
+  dirname=$(basename "$dir")
+  if [[ "$dirname" != "${BRAIN_FOLDER}" ]]; then
+    rm -rf "$dir"
+    CLEANED=$((CLEANED + 1))
+  fi
+done
+if [[ $CLEANED -gt 0 ]]; then
+  log "Removed ${CLEANED} excluded folder(s)."
 fi
 
-# --- Step 5: Install template files -----------------------------------------
+# =============================================================================
+# Step 4: Create brain folder if it doesn't exist
+# =============================================================================
+if [[ ! -d "${BRAIN_DIR}" ]]; then
+  log "Brain folder '${BRAIN_FOLDER}/' not found. Creating it..."
+  mkdir -p "${BRAIN_DIR}"
+fi
+
+# =============================================================================
+# Step 5: Install template files
+# =============================================================================
 if [[ -x "${HOME}/scripts/install-templates.sh" ]]; then
   log "Installing template files into ${BRAIN_DIR}..."
   "${HOME}/scripts/install-templates.sh"
@@ -162,10 +201,18 @@ else
   warn "install-templates.sh not found. Templates not installed."
 fi
 
-# --- Step 6: Verify ---------------------------------------------------------
+# =============================================================================
+# Step 6: Enable and start Dropbox service (with exclusions applied)
+# =============================================================================
+log "Starting Dropbox service (with exclusions applied)..."
+sudo systemctl enable dropbox.service 2>/dev/null || true
+sudo systemctl start dropbox
+
+# Wait briefly and show status
+sleep 3
 echo ""
 log "Dropbox status:"
-dropbox-cli status
+dropbox-cli status 2>/dev/null || true
 echo ""
 log "Brain directory: ${BRAIN_DIR}"
 if [[ -d "${BRAIN_DIR}" ]]; then
