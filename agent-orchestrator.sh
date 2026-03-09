@@ -110,7 +110,7 @@ if [[ "${FILE_SYNC}" == "dropbox" ]]; then
       echo "WARNING: Dropbox sync timeout (${SYNC_TIMEOUT}s). Proceeding."
       break
     fi
-    STATUS=$(dropbox-cli status 2>/dev/null || echo "not running")
+    STATUS=$(maestral status 2>/dev/null | grep -i "Status:" | awk -F': *' '{print $2}' || echo "not running")
     if [[ "$STATUS" == *"Up to date"* ]]; then
       if [[ "$SEEN_UP_TO_DATE" == true ]]; then
         echo "Dropbox synced (confirmed stable)."
@@ -141,7 +141,10 @@ fi
 mkdir -p "${INBOX_DIR}/_processed" 2>/dev/null || true
 
 # --- 4. Build the master prompt ---------------------------------------------
-MASTER_PROMPT=$(cat << PROMPT_END
+RUN_DATE=$(date '+%Y-%m-%d %H:%M')
+RUN_DATE_SHORT=$(date +%Y%m%d)
+
+read -r -d '' MASTER_PROMPT << PROMPT_END || true
 You are running as an autonomous agent on ${OWNER_NAME}'s server. This is an unattended scheduled run.
 
 ## Your Instructions
@@ -152,7 +155,7 @@ You are running as an autonomous agent on ${OWNER_NAME}'s server. This is an una
    - Read the file at: ai/instructions/personal.md (for context about the owner)
 
 2. The orchestrator is capturing your output as the run log at: ${RUN_LOG}
-   Structure your output as a markdown log. Start with: "# Agent Run — $(date '+%Y-%m-%d %H:%M')"
+   Structure your output as a markdown log. Start with: "# Agent Run — ${RUN_DATE}"
    Use the logging format defined in tasks.md for each task.
 
 3. Execute the DEFAULT TASKS defined in default-tasks.md, in order.
@@ -180,7 +183,7 @@ You are running as an autonomous agent on ${OWNER_NAME}'s server. This is an una
    - Next recommended actions
 
 7. If any tasks were deferred or need attention, create a summary file at:
-   "INBOX/_agent-attention-needed-$(date +%Y%m%d).md"
+   "INBOX/_agent-attention-needed-${RUN_DATE_SHORT}.md"
 
 IMPORTANT RULES:
 - Never send emails or messages. Only draft.
@@ -189,7 +192,6 @@ IMPORTANT RULES:
 - Each task should take under 5 minutes. Defer if too large.
 - Be concise in logs. ${OWNER_NAME} will review them quickly.
 PROMPT_END
-)
 
 # --- 5. Run Claude Code with the master prompt -------------------------------
 echo ""
@@ -207,7 +209,7 @@ ALLOWED_TOOLS=()
 ALLOWED_TOOLS+=("Read" "Write" "Edit" "Glob" "Grep" "WebSearch" "WebFetch")
 ALLOWED_TOOLS+=("Bash(cat *)" "Bash(mkdir *)" "Bash(mv *)" "Bash(ls *)" "Bash(date *)")
 if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  ALLOWED_TOOLS+=("Bash(dropbox-cli *)")
+  ALLOWED_TOOLS+=("Bash(maestral *)")
 fi
 
 # MCP tools from Claude Code's config
@@ -240,7 +242,7 @@ echo "=== Claude Code finished (exit code: ${CLAUDE_EXIT}) ==="
 if [[ "${FILE_SYNC}" == "dropbox" ]]; then
   echo "Waiting for Dropbox to sync outputs..."
   sleep 30
-  FINAL_STATUS=$(dropbox-cli status 2>/dev/null || echo "unknown")
+  FINAL_STATUS=$(maestral status 2>/dev/null | grep -i "Status:" | awk -F': *' '{print $2}' || echo "unknown")
   echo "Dropbox status: ${FINAL_STATUS}"
 fi
 

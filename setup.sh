@@ -190,48 +190,52 @@ sudo -u "${UBUNTU_USER}" bash -c 'curl -fsSL https://claude.ai/install.sh | bash
 log "Claude Code installed."
 
 
-# --- 11. Dropbox Headless CLI (optional) -------------------------------------
+# --- 11. Maestral Dropbox Client (optional) -----------------------------------
 if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  log "Installing Dropbox headless daemon..."
-  cd /tmp
-  if [[ $(uname -m) == "x86_64" ]]; then
-    wget -q "https://www.dropbox.com/download?plat=lnx.x86_64" -O dropbox.tar.gz
+  log "Installing Maestral (lightweight Dropbox client)..."
+
+  # Install pipx if not present, then install Maestral
+  apt-get install -y -qq pipx
+  sudo -u "${UBUNTU_USER}" bash -c 'PIPX_HOME="${HOME}/.local/pipx" PIPX_BIN_DIR="${HOME}/.local/bin" pipx install maestral'
+
+  # Verify installation
+  MAESTRAL_BIN="${HOME_DIR}/.local/bin/maestral"
+  if [[ -x "${MAESTRAL_BIN}" ]]; then
+    log "Maestral installed: $(sudo -u "${UBUNTU_USER}" "${MAESTRAL_BIN}" --version 2>/dev/null || echo 'ok')"
   else
-    wget -q "https://www.dropbox.com/download?plat=lnx.aarch64" -O dropbox.tar.gz
+    err "Maestral installation failed. Check pipx output above."
+    exit 1
   fi
-  tar xzf dropbox.tar.gz -C "${HOME_DIR}"
-  rm dropbox.tar.gz
 
-  # Install Dropbox CLI helper
-  wget -q "https://www.dropbox.com/download?dl=packages/dropbox.py" -O /usr/local/bin/dropbox-cli
-  chmod +x /usr/local/bin/dropbox-cli
+  # Enable linger so the user's systemd services start at boot
+  loginctl enable-linger "${UBUNTU_USER}"
 
-  # Create systemd service for Dropbox
-  cat > /etc/systemd/system/dropbox.service << EOF
+  # Create systemd user service for Maestral
+  SYSTEMD_USER_DIR="${HOME_DIR}/.config/systemd/user"
+  sudo -u "${UBUNTU_USER}" mkdir -p "${SYSTEMD_USER_DIR}"
+  cat > "${SYSTEMD_USER_DIR}/maestral.service" << EOF
 [Unit]
-Description=Dropbox Daemon
+Description=Maestral Dropbox Sync
 After=network-online.target
 Wants=network-online.target
 
 [Service]
-User=${UBUNTU_USER}
-Group=${UBUNTU_USER}
-Type=simple
-ExecStart=${HOME_DIR}/.dropbox-dist/dropboxd
+Type=notify
+ExecStart=${MAESTRAL_BIN} start -f
+ExecStop=${MAESTRAL_BIN} stop
+WatchdogSec=30
 Restart=on-failure
 RestartSec=10
-Environment=DISPLAY=
-Environment=HOME=${HOME_DIR}
 
 [Install]
-WantedBy=multi-user.target
+WantedBy=default.target
 EOF
+  chown -R "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/.config/systemd"
 
-  systemctl daemon-reload
-  # NOTE: Do not enable/start Dropbox service here — it needs account linking first.
-  # The agent-setup.sh script will enable and start it after the user links their account.
+  # NOTE: Do not enable/start service here — it needs account linking first.
+  # The agent-setup.sh script will link, configure selective sync, and start it.
 
-  log "Dropbox installed (not started — requires account linking)."
+  log "Maestral installed (not started — requires account linking)."
   log "Run ~/agent-setup.sh to link, configure selective sync, and install templates."
 else
   log "File sync: none. Brain directory will be local at ${BRAIN_DIR}"
@@ -414,7 +418,7 @@ sudo -u "${UBUNTU_USER}" tee "${CLAUDE_SETTINGS_DIR}/settings.json" > /dev/null 
       "Edit",
       "Glob",
       "Grep",
-      "Bash(dropbox-cli *)",
+      "Bash(maestral *)",
       "Bash(cat *)",
       "Bash(mkdir *)",
       "Bash(mv *)",
@@ -469,10 +473,10 @@ chmod +x "${HOME_DIR}/scripts/run-agent.sh"
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/run-agent.sh"
 
 # Create systemd service for agent orchestrator
-# Conditionally depend on dropbox.service if Dropbox is enabled
+# Conditionally depend on maestral service if Dropbox is enabled
 if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  AFTER_DEPS="After=network-online.target dropbox.service"
-  WANTS_DEPS="Wants=network-online.target dropbox.service"
+  AFTER_DEPS="After=network-online.target maestral.service"
+  WANTS_DEPS="Wants=network-online.target maestral.service"
 else
   AFTER_DEPS="After=network-online.target"
   WANTS_DEPS="Wants=network-online.target"
@@ -793,7 +797,7 @@ git: $(git --version 2>/dev/null || echo "not installed")
 aws-cli: $(aws --version 2>/dev/null || echo "not installed")
 claude: installed (run 'claude --version' to check)
 glow: $(glow --version 2>/dev/null || echo "not installed")
-dropbox: $(if [[ "${FILE_SYNC}" == "dropbox" ]]; then echo "installed (headless daemon)"; else echo "not installed (FILE_SYNC=none)"; fi)
+maestral: $(if [[ "${FILE_SYNC}" == "dropbox" ]]; then echo "installed (Dropbox sync via Maestral)"; else echo "not installed (FILE_SYNC=none)"; fi)
 ttyd: $(if [[ "${INSTALL_TTYD}" == "true" ]]; then echo "installed (HTTPS, port 443)"; else echo "not installed"; fi)
 tmux: $(tmux -V 2>/dev/null || echo "not installed")
 uv: installed (run 'uv --version' to check)
@@ -807,7 +811,7 @@ unattended-upgrades: enabled
 ssh: key-only, root disabled
 
 # Services:
-$(if [[ "${FILE_SYNC}" == "dropbox" ]]; then echo "dropbox.service: enabled (systemd)"; fi)
+$(if [[ "${FILE_SYNC}" == "dropbox" ]]; then echo "maestral.service: enabled (systemd user service)"; fi)
 $(if [[ "${INSTALL_TTYD}" == "true" ]]; then echo "ttyd.service: enabled (HTTPS, port 443)"; fi)
 agent-boot-runner.service: $(systemctl is-enabled agent-boot-runner.service 2>/dev/null || echo "unknown")
 MANIFEST

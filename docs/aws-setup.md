@@ -129,14 +129,15 @@ This handles everything in the right order based on `agent.conf`:
 
 1. **Dropbox** (if configured): links account, configures selective sync, starts service
 2. **Brain directory**: creates folders and installs template files
-3. **MCP servers**: registers any that aren't already connected
-4. **Claude Code**: checks authentication status
+3. **Claude Code**: checks authentication status
+4. **MCP servers**: registers any that aren't already connected (requires Claude Code to be initialized first)
 
 The script is safe to re-run — each step checks if it's already done and skips it.
 
-**What to expect:** If using Dropbox, expect noisy output (`dropbox: load fq extension`
-lines and deprecation warnings) — these are normal. After authorizing in the browser,
-you'll see `This computer is now linked to Dropbox` and the script continues automatically.
+**What to expect:** If using Dropbox, Maestral will print a URL. Open it in your browser,
+authorize the app, and paste the authorization code back into the terminal. Maestral then
+queries your Dropbox folders from the server and excludes everything except the brain folder
+— no files are downloaded until selective sync is configured.
 
 At the end, the script prints next steps if anything still needs attention.
 
@@ -160,6 +161,27 @@ claude
 ```
 
 Port mapping: ActingWeb=18850, Gmail=18851, Calendar=18852
+
+#### If `/mcp` shows "No MCP servers configured"
+
+This means `agent-setup.sh` failed to register them (usually a `claude mcp add-json`
+version mismatch). Re-run the setup script — it's safe to re-run:
+
+```bash
+~/agent-setup.sh
+```
+
+If it still fails, register them manually:
+
+```bash
+claude mcp add-json actingweb '{"type":"http","url":"https://ai.actingweb.io/mcp","oauth":{"callbackPort":18850}}'
+claude mcp add-json gmail '{"type":"http","url":"https://gmail.mcp.claude.com/mcp","oauth":{"callbackPort":18851}}'
+claude mcp add-json google-calendar '{"type":"http","url":"https://gcal.mcp.claude.com/mcp","oauth":{"callbackPort":18852}}'
+```
+
+Only add the servers enabled in your `agent.conf` (ActingWeb is always needed;
+Gmail and Google Calendar are optional). Then start `claude` again and run `/mcp`
+to authenticate each one.
 
 #### Test the orchestrator
 
@@ -330,7 +352,7 @@ claude --version
 df -h
 
 # Dropbox health (if configured)
-dropbox-cli status
+maestral status
 
 # Process monitoring
 htop
@@ -338,7 +360,7 @@ htop
 
 ### If the instance reboots
 
-- Dropbox restarts automatically (systemd) — if configured
+- Maestral (Dropbox sync) restarts automatically (systemd user service) — if configured
 - ttyd restarts automatically (systemd) — if configured
 - In scheduled mode: boot runner executes tasks, then stops
 - Cron jobs persist

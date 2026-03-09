@@ -296,15 +296,24 @@ log "Files uploaded."
 step 8 "Run Server Setup"
 # =============================================================================
 log "Running setup.sh on server (this takes a few minutes)..."
+set +eo pipefail
 ssh "${SSH_HOST}" "cd ~/agent-server && chmod +x setup.sh && sudo ./setup.sh" 2>&1 | while IFS= read -r line; do
   # Show only [SETUP], [WARN], and [ERROR] lines to reduce noise
   if echo "$line" | grep -qE '\[(SETUP|WARN|ERROR)\]'; then
     echo "$line"
   fi
 done
+SSH_EXIT=${PIPESTATUS[0]}
+set -eo pipefail
 
-if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
-  err "setup.sh failed. SSH in to debug: ssh ${SSH_HOST}"
+if [[ ${SSH_EXIT} -ne 0 ]]; then
+  err "setup.sh failed (exit code ${SSH_EXIT})."
+  echo ""
+  echo "  setup.sh is safe to re-run (idempotent). To retry with full output:"
+  echo "    ssh ${SSH_HOST} \"cd ~/agent-server && sudo ./setup.sh\""
+  echo ""
+  echo "  Look for the '[SETUP] SETUP COMPLETE' message to confirm success."
+  echo "  If it fails again, check the full output for errors above the failure point."
   exit 1
 fi
 log "Server setup complete."

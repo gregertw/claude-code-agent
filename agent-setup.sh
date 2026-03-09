@@ -72,133 +72,114 @@ ISSUES=0
 # Step 1: Dropbox (if configured)
 # =============================================================================
 if [[ "${FILE_SYNC}" == "dropbox" ]]; then
-  echo -e "${BOLD}Step 1: Dropbox${NC}"
+  echo -e "${BOLD}Step 1: Dropbox (via Maestral)${NC}"
   echo "────────────────────────────────────────"
 
+  MAESTRAL_BIN="${HOME}/.local/bin/maestral"
+
+  if ! command -v "${MAESTRAL_BIN}" &>/dev/null; then
+    err "Maestral not installed. Run setup.sh first."
+    exit 1
+  fi
+
   # 1a. Link account
-  if [[ -d "${DROPBOX_DIR}" ]]; then
-    ok "Account linked (~/Dropbox exists)"
+  MAESTRAL_AUTH=$("${MAESTRAL_BIN}" auth status 2>/dev/null || true)
+  if echo "${MAESTRAL_AUTH}" | grep -qi "linked"; then
+    LINKED_EMAIL=$(echo "${MAESTRAL_AUTH}" | grep -i "email" | sed 's/.*:[[:space:]]*//')
+    ok "Account linked (${LINKED_EMAIL})"
   elif [[ "${VERIFY_ONLY}" == "true" ]]; then
     need "Account not linked"
     ISSUES=$((ISSUES + 1))
   else
     log "Linking Dropbox account..."
     echo ""
-    echo "  Dropbox will print a URL. Open it in your browser."
-    echo "  Ignore 'load fq extension' warnings — they are normal."
-    echo "  The script continues automatically once linked."
+    echo "  Maestral will print a URL. Open it in your browser,"
+    echo "  authorize the app, then paste the authorization code here."
     echo ""
-    read -r -p "  Press Enter to start..."
 
-    LINK_LOG=$(mktemp /tmp/dropbox-link.XXXXXX)
-    "${HOME}/.dropbox-dist/dropboxd" > "${LINK_LOG}" 2>&1 &
-    DBPID=$!
-    tail -f "${LINK_LOG}" &
-    TAILPID=$!
-
-    LINK_TIMEOUT=300
-    LINK_START=$(date +%s)
-    LINKED=false
-    while true; do
-      ELAPSED=$(( $(date +%s) - LINK_START ))
-      [[ $ELAPSED -ge $LINK_TIMEOUT ]] && break
-      if grep -q "linked to Dropbox" "${LINK_LOG}" 2>/dev/null; then
-        LINKED=true
-        sleep 2
-        break
-      fi
-      sleep 1
-    done
-
-    kill $TAILPID 2>/dev/null; wait $TAILPID 2>/dev/null || true
-    kill $DBPID 2>/dev/null; wait $DBPID 2>/dev/null || true
-    rm -f "${LINK_LOG}"
-
-    if [[ "${LINKED}" != "true" ]]; then
-      err "Linking timed out. Run ~/agent-setup.sh again to retry."
+    "${MAESTRAL_BIN}" auth link
+    LINK_EXIT=$?
+    if [[ $LINK_EXIT -ne 0 ]]; then
+      err "Linking failed (exit code ${LINK_EXIT}). Run ~/agent-setup.sh again to retry."
       exit 1
     fi
     ok "Account linked successfully"
   fi
 
-  # 1b. Selective sync
-  if [[ -d "${DROPBOX_DIR}" ]]; then
-    # Count non-brain folders
-    OTHER_FOLDERS=0
-    for dir in "${DROPBOX_DIR}"/*/; do
-      [[ ! -d "$dir" ]] && continue
-      dirname=$(basename "$dir")
-      [[ "$dirname" != "${BRAIN_FOLDER}" ]] && OTHER_FOLDERS=$((OTHER_FOLDERS + 1))
-    done
+  # 1b. Selective sync — exclude everything except brain folder
+  # Uses maestral ls to query remote folders BEFORE syncing them down.
+  MAESTRAL_AUTH=$("${MAESTRAL_BIN}" auth status 2>/dev/null || true)
+  if echo "${MAESTRAL_AUTH}" | grep -qi "linked"; then
 
-    if [[ $OTHER_FOLDERS -eq 0 ]]; then
+    # Get current exclusion list
+    EXCLUDED_LIST=$("${MAESTRAL_BIN}" excluded list 2>/dev/null || true)
+
+    # List remote top-level folders (queries Dropbox server, no local sync needed)
+    log "Querying Dropbox for folder listing..."
+    REMOTE_FOLDERS=$("${MAESTRAL_BIN}" ls 2>/dev/null || true)
+
+    EXCLUDED=0
+    ALREADY_EXCLUDED=0
+    while IFS= read -r item; do
+      # Skip empty lines and the brain folder
+      [[ -z "$item" ]] && continue
+      # maestral ls output may have trailing slashes or whitespace
+      item=$(echo "$item" | sed 's/[[:space:]]*$//' | sed 's/\/$//')
+      [[ -z "$item" ]] && continue
+      [[ "$item" == "${BRAIN_FOLDER}" ]] && continue
+
+      # Check if already excluded
+      if echo "${EXCLUDED_LIST}" | grep -q "$item" 2>/dev/null; then
+        ALREADY_EXCLUDED=$((ALREADY_EXCLUDED + 1))
+      else
+        "${MAESTRAL_BIN}" excluded add "$item" 2>/dev/null && EXCLUDED=$((EXCLUDED + 1)) || true
+      fi
+    done <<< "${REMOTE_FOLDERS}"
+
+    if [[ $EXCLUDED -gt 0 ]]; then
+      ok "Excluded ${EXCLUDED} folder(s) from sync"
+    fi
+    if [[ $ALREADY_EXCLUDED -gt 0 ]]; then
+      skip "${ALREADY_EXCLUDED} folder(s) already excluded"
+    fi
+    if [[ $EXCLUDED -eq 0 && $ALREADY_EXCLUDED -eq 0 ]]; then
       ok "Selective sync configured (only '${BRAIN_FOLDER}/' syncing)"
-    elif [[ "${VERIFY_ONLY}" == "true" ]]; then
-      need "Found ${OTHER_FOLDERS} non-brain folder(s) syncing"
-      ISSUES=$((ISSUES + 1))
-    else
-      log "Configuring selective sync..."
-
-      # Stop Dropbox to prevent syncing everything
-      sudo systemctl stop dropbox 2>/dev/null || true
-      pkill -f dropboxd 2>/dev/null || true
-      sleep 2
-
-      # Start daemon temporarily for exclude API
-      "${HOME}/.dropbox-dist/dropboxd" > /dev/null 2>&1 &
-      DBPID=$!
-      for i in $(seq 1 15); do
-        dropbox-cli status 2>/dev/null | grep -qv "isn't running" && break
-        sleep 1
-      done
-      sleep 5
-
-      # Apply exclusions
-      EXCLUDED=0
-      for dir in "${DROPBOX_DIR}"/*/; do
-        [[ ! -d "$dir" ]] && continue
-        dirname=$(basename "$dir")
-        if [[ "$dirname" != "${BRAIN_FOLDER}" ]]; then
-          dropbox-cli exclude add "$dir" >/dev/null 2>&1 || true
-          EXCLUDED=$((EXCLUDED + 1))
-        fi
-      done
-
-      # Stop daemon and clean up downloaded excluded folders
-      kill $DBPID 2>/dev/null; wait $DBPID 2>/dev/null || true
-      pkill -f dropboxd 2>/dev/null || true
-      sleep 2
-
-      CLEANED=0
-      for dir in "${DROPBOX_DIR}"/*/; do
-        [[ ! -d "$dir" ]] && continue
-        dirname=$(basename "$dir")
-        if [[ "$dirname" != "${BRAIN_FOLDER}" ]]; then
-          rm -rf "$dir"
-          CLEANED=$((CLEANED + 1))
-        fi
-      done
-
-      ok "Excluded ${EXCLUDED} folder(s), cleaned up ${CLEANED}"
     fi
   fi
 
-  # 1c. Start Dropbox service
-  if systemctl is-active --quiet dropbox.service 2>/dev/null; then
-    ok "Dropbox service running"
+  # 1c. Start Maestral service
+  # Use systemd user service (requires loginctl enable-linger, done in setup.sh)
+  MAESTRAL_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null | grep -i "Status:" | sed 's/.*Status:[[:space:]]*//' || true)
+
+  if [[ -n "${MAESTRAL_STATUS}" && "${MAESTRAL_STATUS}" != *"not running"* ]]; then
+    ok "Maestral running (${MAESTRAL_STATUS})"
   elif [[ "${VERIFY_ONLY}" == "true" ]]; then
-    need "Dropbox service not running"
+    need "Maestral not running"
     ISSUES=$((ISSUES + 1))
   else
-    log "Starting Dropbox service..."
-    sudo systemctl enable dropbox.service 2>/dev/null || true
-    sudo systemctl start dropbox 2>/dev/null || true
-    sleep 2
-    if systemctl is-active --quiet dropbox.service 2>/dev/null; then
-      ok "Dropbox service started"
+    log "Starting Maestral..."
+    # Enable and start the systemd user service
+    systemctl --user daemon-reload 2>/dev/null || true
+    systemctl --user enable maestral.service 2>/dev/null || true
+    systemctl --user start maestral.service 2>/dev/null || true
+    sleep 3
+
+    # Verify it started
+    MAESTRAL_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null | grep -i "Status:" | sed 's/.*Status:[[:space:]]*//' || true)
+    if [[ -n "${MAESTRAL_STATUS}" ]]; then
+      ok "Maestral started (${MAESTRAL_STATUS})"
     else
-      warn "Dropbox service failed to start"
-      ISSUES=$((ISSUES + 1))
+      # Fallback: start directly
+      warn "Systemd service didn't start, starting Maestral directly..."
+      "${MAESTRAL_BIN}" start 2>/dev/null || true
+      sleep 3
+      MAESTRAL_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null | grep -i "Status:" | sed 's/.*Status:[[:space:]]*//' || true)
+      if [[ -n "${MAESTRAL_STATUS}" ]]; then
+        ok "Maestral started (${MAESTRAL_STATUS})"
+      else
+        warn "Maestral failed to start"
+        ISSUES=$((ISSUES + 1))
+      fi
     fi
   fi
 
@@ -282,11 +263,54 @@ fi
 echo ""
 
 # =============================================================================
-# Step 3: MCP servers
+# Step 3: Claude Code authentication
+# =============================================================================
+STEP_NUM=$((STEP_NUM + 1))
+echo -e "${BOLD}Step ${STEP_NUM}: Claude Code${NC}"
+echo "────────────────────────────────────────"
+
+# Check if Claude Code is authenticated
+CLAUDE_AUTH="none"
+CLAUDE_INITIALIZED=false
+if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
+  CLAUDE_AUTH="api_key"
+  CLAUDE_INITIALIZED=true
+  ok "Authentication: API key configured"
+elif [[ -f "${HOME}/.claude/.credentials.json" ]] && \
+     python3 -c "import json; d=json.load(open('${HOME}/.claude/.credentials.json')); assert d.get('claudeAiOauth',{}).get('accessToken')" 2>/dev/null; then
+  CLAUDE_AUTH="account"
+  CLAUDE_INITIALIZED=true
+  ok "Authentication: account login"
+else
+  need "Claude Code not authenticated"
+  need "Run 'claude' to complete initial setup (theme + login), then re-run ~/agent-setup.sh"
+  ISSUES=$((ISSUES + 1))
+fi
+
+# Check settings.json
+if [[ -f "${HOME}/.claude/settings.json" ]]; then
+  ok "Permissions: settings.json exists"
+else
+  need "Permissions: settings.json missing"
+  ISSUES=$((ISSUES + 1))
+fi
+
+echo ""
+
+# =============================================================================
+# Step 4: MCP servers
 # =============================================================================
 STEP_NUM=$((STEP_NUM + 1))
 echo -e "${BOLD}Step ${STEP_NUM}: MCP servers${NC}"
 echo "────────────────────────────────────────"
+
+# MCP registration requires Claude Code to be initialized first
+if [[ "${CLAUDE_INITIALIZED}" == "false" ]]; then
+  warn "Skipping MCP registration — Claude Code must be initialized first."
+  echo "  Complete Claude Code login (step above), then re-run ~/agent-setup.sh"
+  MCP_NEEDS_AUTH=false
+  ISSUES=$((ISSUES + 1))
+else
 
 # Check existing MCP connections
 EXISTING_MCP=""
@@ -304,17 +328,28 @@ is_registered() {
 
 add_mcp_server() {
   local name="$1" url="$2" port="$3"
-  claude mcp add-json "$name" "{\"type\":\"http\",\"url\":\"${url}\",\"oauth\":{\"callbackPort\":${port}}}" 2>/dev/null || {
-    # Fallback: write directly to ~/.claude.json
-    python3 -c "
+  local json_config="{\"type\":\"http\",\"url\":\"${url}\",\"oauth\":{\"callbackPort\":${port}}}"
+
+  if claude mcp add-json "$name" "$json_config" 2>&1; then
+    return 0
+  fi
+
+  warn "claude mcp add-json failed, trying direct config write..."
+
+  # Fallback: write directly to ~/.claude.json
+  python3 -c "
 import json, os
 p = os.path.expanduser('~/.claude.json')
 try:
     c = json.load(open(p))
-except: c = {}
+except:
+    c = {}
 c.setdefault('mcpServers',{})['${name}'] = {'type':'http','url':'${url}','oauth':{'callbackPort':${port}}}
 json.dump(c, open(p,'w'), indent=2)
-" 2>/dev/null
+print('  Written to ' + p)
+" || {
+    err "Failed to register ${name} MCP server"
+    return 1
   }
 }
 
@@ -374,36 +409,7 @@ if [[ "${SETUP_GOOGLE_CALENDAR}" == "true" ]]; then
   fi
 fi
 
-echo ""
-
-# =============================================================================
-# Step 4: Claude Code authentication
-# =============================================================================
-STEP_NUM=$((STEP_NUM + 1))
-echo -e "${BOLD}Step ${STEP_NUM}: Claude Code${NC}"
-echo "────────────────────────────────────────"
-
-# Check if Claude Code is authenticated
-CLAUDE_AUTH="none"
-if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
-  CLAUDE_AUTH="api_key"
-  ok "Authentication: API key configured"
-elif [[ -f "${HOME}/.claude/.credentials.json" ]] && \
-     python3 -c "import json; d=json.load(open('${HOME}/.claude/.credentials.json')); assert d.get('claudeAiOauth',{}).get('accessToken')" 2>/dev/null; then
-  CLAUDE_AUTH="account"
-  ok "Authentication: account login"
-else
-  need "Claude Code not authenticated (run 'claude' to log in)"
-  ISSUES=$((ISSUES + 1))
-fi
-
-# Check settings.json
-if [[ -f "${HOME}/.claude/settings.json" ]]; then
-  ok "Permissions: settings.json exists"
-else
-  need "Permissions: settings.json missing"
-  ISSUES=$((ISSUES + 1))
-fi
+fi  # end CLAUDE_INITIALIZED check
 
 echo ""
 
@@ -440,6 +446,7 @@ if [[ "${CLAUDE_AUTH}" == "none" || "${MCP_NEEDS_AUTH}" == "true" ]]; then
   NEXT_NUM=1
   if [[ "${CLAUDE_AUTH}" == "none" ]]; then
     echo "  ${NEXT_NUM}. Complete Claude Code login (theme + API key or account)"
+    echo "     Then re-run ~/agent-setup.sh to register MCP servers"
     NEXT_NUM=$((NEXT_NUM + 1))
   fi
 
