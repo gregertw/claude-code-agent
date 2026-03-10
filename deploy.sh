@@ -348,6 +348,15 @@ ssh "${SSH_HOST}" "mkdir -p ~/agent-server"
 scp -q -r "${SCRIPT_DIR}"/* "${SSH_HOST}:~/agent-server/"
 log "Files uploaded."
 
+# Set server timezone to match local machine
+LOCAL_TZ=$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
+if [[ -n "${LOCAL_TZ}" ]]; then
+  ssh "${SSH_HOST}" "sudo timedatectl set-timezone '${LOCAL_TZ}'"
+  log "Timezone set to ${LOCAL_TZ}"
+else
+  warn "Could not detect local timezone — server will use UTC."
+fi
+
 # =============================================================================
 step 9 "Run Server Setup"
 # =============================================================================

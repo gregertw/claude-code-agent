@@ -295,12 +295,18 @@ echo "============================================================"
 # --- 9. Wait for Dropbox sync (if Maestral is running) ---------------------
 MAESTRAL_BIN="${HOME_DIR}/.local/bin/maestral"
 if command -v "${MAESTRAL_BIN}" &>/dev/null && "${MAESTRAL_BIN}" status &>/dev/null; then
+  # Kick maestral to rescan local changes — avoids a race where status reports
+  # "Up to date" before it notices newly written files.
+  "${MAESTRAL_BIN}" pause >/dev/null 2>&1 || true
+  sleep 1
+  "${MAESTRAL_BIN}" resume >/dev/null 2>&1 || true
+  sleep 2
   echo "Waiting for Dropbox sync to complete..."
   SYNC_WAIT=0
   SYNC_TIMEOUT=120
   while [[ ${SYNC_WAIT} -lt ${SYNC_TIMEOUT} ]]; do
     SYNC_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null || echo "")
-    if echo "${SYNC_STATUS}" | grep -qi "up to date\|idle\|paused"; then
+    if echo "${SYNC_STATUS}" | grep -qi "up to date\|idle"; then
       echo "Dropbox sync complete."
       break
     fi

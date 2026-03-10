@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- Set server timezone to match local machine during deploy
 - Add MCP warm-up step to orchestrator — fires a background Claude call to initialize all MCP connections before the main run
 - Add ARCHITECTURE.md documenting repo structure, setup paths, server layout, and task execution flow
 - Add cron job to run the orchestrator every SCHEDULE_INTERVAL minutes while the instance is up
@@ -23,6 +24,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Consolidate setup-mcp.sh into agent-setup.sh
 
 ### Fixed
+- Fix Dropbox sync race — pause+resume maestral before waiting to force a local rescan of newly written files
 - Fix duplicate run logs — write directly to `output/logs/` instead of `~/logs/` + copy; Claude no longer writes a separate log file
 - Fix Dropbox sync check always timing out (`maestral status` output starts with a blank line)
 - Fix orchestrator not running periodically when instance stays up (boot runner only fires once)
