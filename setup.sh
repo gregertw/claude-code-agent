@@ -482,6 +482,24 @@ else
   log "Auto-upgrade DISABLED."
 fi
 
+# --- 14b. Hourly Orchestrator Cron ------------------------------------------
+# Run the orchestrator every SCHEDULE_INTERVAL minutes (or every 60 if unset).
+# This ensures the agent runs periodically regardless of schedule mode:
+#   - Scheduled mode: EventBridge wakes the instance, cron keeps it running
+#     while awake (e.g. if the user does a manual wakeup and stays connected)
+#   - Always-on mode: cron is the primary trigger since the instance never stops
+# The orchestrator uses flock to prevent concurrent runs, so overlapping cron
+# triggers (or cron + boot runner) are harmless.
+log "Installing orchestrator cron job..."
+CRON_INTERVAL="${SCHEDULE_INTERVAL:-60}"
+cat > /etc/cron.d/agent-orchestrator << CRON
+# Run agent orchestrator every ${CRON_INTERVAL} minutes
+# flock in the orchestrator prevents concurrent runs
+*/${CRON_INTERVAL} * * * * ${UBUNTU_USER} ${HOME_DIR}/scripts/agent-orchestrator.sh >> ${HOME_DIR}/logs/cron-orchestrator.log 2>&1
+CRON
+chmod 644 /etc/cron.d/agent-orchestrator
+log "Orchestrator cron installed (every ${CRON_INTERVAL} min)."
+
 # --- 15. Schedule Mode Toggle Script ----------------------------------------
 log "Creating schedule mode toggle..."
 cat > "${HOME_DIR}/scripts/set-schedule-mode.sh" << 'TOGGLE_SCRIPT'
@@ -498,16 +516,38 @@ fi
 
 sed -i "s/^SCHEDULE_MODE=.*/SCHEDULE_MODE=\"${MODE}\"/" "${HOME_DIR}/.agent-schedule"
 
+# Update cron interval if provided
+INTERVAL="${2:-}"
+if [[ -n "$INTERVAL" ]]; then
+  sed -i "s/^SCHEDULE_INTERVAL=.*/SCHEDULE_INTERVAL=\"${INTERVAL}\"/" "${HOME_DIR}/.agent-schedule"
+fi
+
+# Read current interval for cron update
+source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
+CRON_INTERVAL="${SCHEDULE_INTERVAL:-60}"
+
+# Update orchestrator cron with current interval
+sudo tee /etc/cron.d/agent-orchestrator > /dev/null << CRON
+# Run agent orchestrator every ${CRON_INTERVAL} minutes
+# flock in the orchestrator prevents concurrent runs
+*/${CRON_INTERVAL} * * * * $(whoami) ${HOME_DIR}/scripts/agent-orchestrator.sh >> ${HOME_DIR}/logs/cron-orchestrator.log 2>&1
+CRON
+sudo chmod 644 /etc/cron.d/agent-orchestrator
+
 if [[ "$MODE" == "scheduled" ]]; then
   systemctl enable agent-boot-runner.service
-  echo "Switched to SCHEDULED mode."
-  echo "  Instance will run tasks at boot and then stop itself."
+  echo "Switched to SCHEDULED mode (every ${CRON_INTERVAL} min)."
+  echo "  Boot runner: enabled (runs at instance start)"
+  echo "  Cron: every ${CRON_INTERVAL} min (runs while instance is up)"
+  echo "  Self-stop: enabled after each run"
   echo "  Use ./agent-manager.sh --scheduled from your local machine to set up EventBridge."
   echo "  To prevent self-stop during SSH: touch ~/agents/.keep-running"
 else
   systemctl disable agent-boot-runner.service
-  echo "Switched to ALWAYS-ON mode."
-  echo "  Instance runs 24/7. Boot runner disabled."
+  echo "Switched to ALWAYS-ON mode (every ${CRON_INTERVAL} min)."
+  echo "  Boot runner: disabled"
+  echo "  Cron: every ${CRON_INTERVAL} min"
+  echo "  Self-stop: disabled"
 fi
 
 echo ""

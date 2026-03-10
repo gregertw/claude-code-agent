@@ -28,6 +28,17 @@ TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 RUN_LOG="${LOG_DIR}/agent-run-${TIMESTAMP}.md"
 ORCHESTRATOR_LOG="${LOG_DIR}/orchestrator-${TIMESTAMP}.log"
 NO_STOP="${1:-}"
+LOCK_FILE="${HOME_DIR}/.agent-orchestrator.lock"
+
+# --- Lock: prevent concurrent runs ------------------------------------------
+# Use a lock file with flock to ensure only one orchestrator runs at a time.
+# If another instance is already running, exit silently (cron will retry next interval).
+exec 9>"${LOCK_FILE}"
+if ! flock -n 9; then
+  echo "Another orchestrator is already running. Exiting."
+  exit 0
+fi
+# Lock is held for the lifetime of this process (fd 9 stays open).
 
 # --- Setup -------------------------------------------------------------------
 mkdir -p "${LOG_DIR}"
@@ -250,7 +261,27 @@ fi
 echo ""
 echo "============================================================"
 
-# --- 9. Self-stop (scheduled mode) -----------------------------------------
+# --- 9. Wait for Dropbox sync (if Maestral is running) ---------------------
+MAESTRAL_BIN="${HOME_DIR}/.local/bin/maestral"
+if command -v "${MAESTRAL_BIN}" &>/dev/null && "${MAESTRAL_BIN}" status &>/dev/null; then
+  echo "Waiting for Dropbox sync to complete..."
+  SYNC_WAIT=0
+  SYNC_TIMEOUT=120
+  while [[ ${SYNC_WAIT} -lt ${SYNC_TIMEOUT} ]]; do
+    SYNC_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null | head -1 || echo "")
+    if echo "${SYNC_STATUS}" | grep -qi "up to date\|idle\|paused"; then
+      echo "Dropbox sync complete."
+      break
+    fi
+    sleep 5
+    SYNC_WAIT=$((SYNC_WAIT + 5))
+  done
+  if [[ ${SYNC_WAIT} -ge ${SYNC_TIMEOUT} ]]; then
+    echo "WARNING: Dropbox sync did not complete within ${SYNC_TIMEOUT}s. Proceeding anyway."
+  fi
+fi
+
+# --- 10. Self-stop (scheduled mode) ----------------------------------------
 if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && "${NO_STOP}" != "--no-stop" ]]; then
   echo "Scheduled mode: hibernating instance in 10 seconds..."
   echo "(Cancel with: touch ~/agents/.keep-running)"
