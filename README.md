@@ -100,11 +100,11 @@ reference material for humans — you can skip it.
 Paste this into Claude Desktop Cowork or Claude Code:
 
 ```txt
-Follow the instructions at https://github.com/gregertw/claude-code-agent
-to set up an autonomous AI agent. Start with the README.md.
+Download https://github.com/gregertw/claude-code-agent/archive/refs/heads/main.zip
+to /tmp/, unzip it, then read the README.md inside and follow the setup instructions.
 ```
 
-The AI will download the repo for you and guide you through setup step by step.
+The AI will download the repo, read the setup guide, and walk you through it step by step.
 
 ---
 
