@@ -23,7 +23,7 @@ This workspace is managed by an AI agent. It can also be used as an
 2. **Use `ai/scratchpad/`** for any intermediate work.
 3. **Save final outputs** to `{OUTPUT_FOLDER}/`.
 4. **Save task results** to `{OUTPUT_FOLDER}/tasks/`.
-5. **Save run logs** to `{OUTPUT_FOLDER}/logs/`.
+5. **Run logs** are captured automatically by the orchestrator to `{OUTPUT_FOLDER}/logs/` — do not write separate log files.
 6. **Use ActingWeb memories actively** — search before starting, save decisions and discoveries.
 
 ## Memory Protocol (ActingWeb)
@@ -44,8 +44,7 @@ create recurring scheduled tasks for the default task cycle. Use these guideline
 - **Explain** that schedules run while the session is open — when starting a new session,
   the schedule needs to be set up again (or included in the opening prompt)
 - **Use the default-tasks prompt**: "Run the default task cycle. Read ai/instructions/tasks.md
-  and ai/instructions/default-tasks.md, then execute all applicable default tasks.
-  Write the log to {OUTPUT_FOLDER}/logs/."
+  and ai/instructions/default-tasks.md, then execute all applicable default tasks."
 
 ## Key Rules
 

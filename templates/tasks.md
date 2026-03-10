@@ -177,6 +177,6 @@ The agent actively looks for ways to improve its own instructions and offer more
 ## Post-Run
 
 After all tasks are processed:
-1. Write the run log to `output/logs/` with filename `run-YYYY-MM-DD-HHMM.md`
+1. Do NOT write a separate log file — the orchestrator captures your output automatically to `output/logs/`
 2. If any tasks were deferred or failed, create a summary note in `INBOX/` named `_agent-attention-needed-YYYYMMDD.md` listing items that need attention
 3. If in scheduled mode, the orchestrator will handle shutdown

@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- Add MCP warm-up step to orchestrator — fires a background Claude call to initialize all MCP connections before the main run
 - Add ARCHITECTURE.md documenting repo structure, setup paths, server layout, and task execution flow
 - Add cron job to run the orchestrator every SCHEDULE_INTERVAL minutes while the instance is up
 - Add flock-based locking to the orchestrator to prevent concurrent runs
@@ -14,6 +15,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Wait for Dropbox sync to complete before self-stopping the instance (polls maestral status, 120s timeout)
 
 ### Changed
+- Consolidate run logs to single location (`output/logs/`) — remove `~/logs/` copy step, update CLI to read from brain dir
 - Rewrite Dropbox selective sync to pause maestral, parse `maestral ls -l` output for sync status, and skip already-excluded folders
 - Update quick-start prompt to tell AI to download the zip directly instead of web-fetching GitHub
 - Link ARCHITECTURE.md from the reference section in README.md
@@ -21,6 +23,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Consolidate setup-mcp.sh into agent-setup.sh
 
 ### Fixed
+- Fix duplicate run logs — write directly to `output/logs/` instead of `~/logs/` + copy; Claude no longer writes a separate log file
+- Fix Dropbox sync check always timing out (`maestral status` output starts with a blank line)
 - Fix orchestrator not running periodically when instance stays up (boot runner only fires once)
 - Fix Dropbox setup failing to exclude folders because maestral was not paused during exclusion changes
 

@@ -23,10 +23,9 @@ set -uo pipefail
 # --- Configuration -----------------------------------------------------------
 HOME_DIR="${HOME:-/home/ubuntu}"
 SCRIPTS_DIR="${HOME_DIR}/scripts"
-LOG_DIR="${HOME_DIR}/logs"
+ORCH_LOG_DIR="${HOME_DIR}/logs"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-RUN_LOG="${LOG_DIR}/agent-run-${TIMESTAMP}.md"
-ORCHESTRATOR_LOG="${LOG_DIR}/orchestrator-${TIMESTAMP}.log"
+ORCHESTRATOR_LOG="${ORCH_LOG_DIR}/orchestrator-${TIMESTAMP}.log"
 NO_STOP="${1:-}"
 LOCK_FILE="${HOME_DIR}/.agent-orchestrator.lock"
 
@@ -41,7 +40,7 @@ fi
 # Lock is held for the lifetime of this process (fd 9 stays open).
 
 # --- Setup -------------------------------------------------------------------
-mkdir -p "${LOG_DIR}"
+mkdir -p "${ORCH_LOG_DIR}"
 
 exec > >(tee -a "${ORCHESTRATOR_LOG}") 2>&1
 
@@ -65,6 +64,10 @@ OWNER_NAME="${OWNER_NAME:-Agent}"
 OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
 BRAIN_DIR="${HOME_DIR}/brain"
 INBOX_DIR="${BRAIN_DIR}/INBOX"
+LOG_DIR="${BRAIN_DIR}/${OUTPUT_FOLDER}/logs"
+RUN_LOG="${LOG_DIR}/agent-run-${TIMESTAMP}.md"
+
+mkdir -p "${LOG_DIR}"
 
 echo "Owner: ${OWNER_NAME}"
 echo "Brain dir: ${BRAIN_DIR}"
@@ -111,7 +114,52 @@ fi
 # Ensure INBOX and _processed dirs exist
 mkdir -p "${INBOX_DIR}/_processed" 2>/dev/null || true
 
-# --- 3. Build the master prompt ---------------------------------------------
+# --- 3. MCP warm-up ----------------------------------------------------------
+# Fire a quick Claude call that touches MCP servers to wake up connections.
+# Runs in the background so it doesn't block startup — the main run benefits
+# from connections already being initialized.
+CLAUDE_CONFIG="${HOME_DIR}/.claude.json"
+MCP_SERVERS=()
+
+if [[ -f "${CLAUDE_CONFIG}" ]]; then
+  while IFS= read -r server; do
+    [[ -n "$server" ]] && MCP_SERVERS+=("${server}")
+  done < <(python3 -c "
+import json
+with open('${CLAUDE_CONFIG}') as f:
+    d = json.load(f)
+seen = set()
+for name in d.get('mcpServers', {}):
+    print(name)
+    seen.add(name.lower())
+for name in d.get('claudeAiMcpEverConnected', []):
+    sanitized = name.replace('.', '_').replace(' ', '_')
+    if sanitized.lower() not in seen:
+        print(sanitized)
+" 2>/dev/null || true)
+fi
+
+if [[ ${#MCP_SERVERS[@]} -gt 0 ]]; then
+  echo "Warming up ${#MCP_SERVERS[@]} MCP server(s) in background: ${MCP_SERVERS[*]}"
+  WARMUP_TOOLS=()
+  for server in "${MCP_SERVERS[@]}"; do
+    WARMUP_TOOLS+=("mcp__${server}")
+  done
+  (
+    cd "${BRAIN_DIR}" && timeout 20 claude -p \
+      "Call one tool from each available MCP server to warm up connections. Be quick, just confirm each works." \
+      --max-turns 5 \
+      --allowedTools "${WARMUP_TOOLS[@]}" \
+      --output-format text >/dev/null 2>&1
+  ) &
+  WARMUP_PID=$!
+  echo "  Warm-up running (pid ${WARMUP_PID}), continuing with startup..."
+else
+  echo "No MCP servers configured."
+fi
+echo ""
+
+# --- 4. Build the master prompt ---------------------------------------------
 RUN_DATE=$(date '+%Y-%m-%d %H:%M')
 RUN_DATE_SHORT=$(date +%Y%m%d)
 
@@ -164,7 +212,7 @@ IMPORTANT RULES:
 - Be concise in logs. ${OWNER_NAME} will review them quickly.
 PROMPT_END
 
-# --- 4. Run Claude Code with the master prompt -------------------------------
+# --- 5. Run Claude Code with the master prompt -------------------------------
 echo ""
 echo "=== Handing control to Claude Code ==="
 echo "Working directory: ${BRAIN_DIR}"
@@ -180,26 +228,10 @@ ALLOWED_TOOLS=()
 ALLOWED_TOOLS+=("Read" "Write" "Edit" "Glob" "Grep" "WebSearch" "WebFetch")
 ALLOWED_TOOLS+=("Bash(cat *)" "Bash(mkdir *)" "Bash(mv *)" "Bash(ls *)" "Bash(date *)")
 
-# MCP tools from Claude Code's config (both local and cloud-synced servers)
-CLAUDE_CONFIG="${HOME_DIR}/.claude.json"
-if [[ -f "${CLAUDE_CONFIG}" ]]; then
-  while IFS= read -r server; do
-    [[ -n "$server" ]] && ALLOWED_TOOLS+=("mcp__${server}")
-  done < <(python3 -c "
-import json
-with open('${CLAUDE_CONFIG}') as f:
-    d = json.load(f)
-# Local MCP servers (registered via 'claude mcp add')
-for name in d.get('mcpServers', {}):
-    print(name)
-# Cloud-synced MCP servers (claude.ai connectors)
-# These use tool names like 'mcp__claude_ai_ServerName' (spaces replaced with _)
-for name in d.get('claudeAiMcpEverConnected', []):
-    # Convert 'claude.ai ServerName' to 'claude_ai_ServerName'
-    sanitized = name.replace('.', '_').replace(' ', '_')
-    print(sanitized)
-" 2>/dev/null || true)
-fi
+# MCP tools — all configured servers
+for server in "${MCP_SERVERS[@]}"; do
+  ALLOWED_TOOLS+=("mcp__${server}")
+done
 
 # Run Claude in non-interactive mode with the master prompt
 # --max-turns prevents infinite loops in autonomous mode
@@ -213,11 +245,6 @@ CLAUDE_EXIT=$?
 echo ""
 echo "=== Claude Code finished (exit code: ${CLAUDE_EXIT}) ==="
 
-# --- 5. Copy run log to brain output/logs/ -----------------------------------
-BRAIN_LOG_DIR="${BRAIN_DIR}/${OUTPUT_FOLDER}/logs"
-mkdir -p "${BRAIN_LOG_DIR}"
-cp "${RUN_LOG}" "${BRAIN_LOG_DIR}/" 2>/dev/null || true
-
 # --- 6. Write heartbeat file (for monitoring) ---------------------------------
 HEARTBEAT_FILE="${BRAIN_DIR}/${OUTPUT_FOLDER}/.agent-heartbeat"
 cat > "${HEARTBEAT_FILE}" << EOF
@@ -229,9 +256,13 @@ EOF
 # --- 7. Log cleanup (keep last 100 logs) ------------------------------------
 LOG_COUNT=$(ls -1 "${LOG_DIR}"/agent-run-*.md 2>/dev/null | wc -l)
 if [[ ${LOG_COUNT} -gt 100 ]]; then
-  echo "Cleaning old logs (keeping last 100)..."
+  echo "Cleaning old run logs (keeping last 100)..."
   ls -1t "${LOG_DIR}"/agent-run-*.md | tail -n +101 | xargs rm -f
-  ls -1t "${LOG_DIR}"/orchestrator-*.log | tail -n +101 | xargs rm -f
+fi
+ORCH_LOG_COUNT=$(ls -1 "${ORCH_LOG_DIR}"/orchestrator-*.log 2>/dev/null | wc -l)
+if [[ ${ORCH_LOG_COUNT} -gt 100 ]]; then
+  echo "Cleaning old orchestrator logs (keeping last 100)..."
+  ls -1t "${ORCH_LOG_DIR}"/orchestrator-*.log | tail -n +101 | xargs rm -f
 fi
 
 # --- 8. Print status summary (paste-friendly for AI) -----------------------
@@ -268,7 +299,7 @@ if command -v "${MAESTRAL_BIN}" &>/dev/null && "${MAESTRAL_BIN}" status &>/dev/n
   SYNC_WAIT=0
   SYNC_TIMEOUT=120
   while [[ ${SYNC_WAIT} -lt ${SYNC_TIMEOUT} ]]; do
-    SYNC_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null | head -1 || echo "")
+    SYNC_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null || echo "")
     if echo "${SYNC_STATUS}" | grep -qi "up to date\|idle\|paused"; then
       echo "Dropbox sync complete."
       break

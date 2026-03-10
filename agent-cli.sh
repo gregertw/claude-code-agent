@@ -50,7 +50,7 @@ source "${HOME}/.agent-schedule" 2>/dev/null || true
 OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
 BRAIN_DIR="${HOME}/brain"
 
-LOG_DIR="${HOME}/logs"
+LOG_DIR="${BRAIN_DIR}/${OUTPUT_FOLDER}/logs"
 OUTPUT_DIR="${BRAIN_DIR}/${OUTPUT_FOLDER}"
 INBOX_DIR="${BRAIN_DIR}/INBOX"
 
