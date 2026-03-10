@@ -2,6 +2,76 @@
 
 Create a cloud instance that runs the agent autonomously.
 
+## FOR AIs: Guided Setup
+
+**If you are an AI guiding a user through this, follow these steps in order.**
+Wait for the user to confirm each step before proceeding.
+
+### B1: Check prerequisites
+
+Ask the user to confirm they have:
+
+- An **AWS account** with the **AWS CLI** installed and configured (`aws configure`)
+- **One of:**
+  - An Anthropic API key from console.anthropic.com, **or**
+  - A Claude Pro, Max, or Enterprise subscription (they will log in on the server)
+
+### B2: Configure `agent.conf`
+
+Help the user create `agent.conf` from `agent.conf.example`. Ask them for:
+
+- `OWNER_NAME` — their name
+- `SCHEDULE_MODE` — `"always-on"` or `"scheduled"`
+- `AWS_REGION` — which AWS region (default: `eu-north-1`)
+- `INSTALL_TTYD` — want a web terminal? (`true`/`false`)
+- If ttyd: `TTYD_USER` and `TTYD_PASSWORD` (must not be `changeme`)
+- `SETUP_GMAIL` / `SETUP_GOOGLE_CALENDAR` — email/calendar integration?
+
+### B3: Run deploy.sh
+
+If the user has an API key, tell them to set it first:
+```
+export ANTHROPIC_API_KEY="sk-ant-..."
+```
+Then tell them to run `./deploy.sh` and paste back the status output.
+
+The script is fully automated — it creates AWS resources, sets up the server,
+registers MCP servers, and deploys the scheduler. It takes a few minutes.
+
+### B4: Review deploy status
+
+The user should paste the deploy status output back. Check it for:
+- `DEPLOY STATUS: SUCCESS`
+- Note the `Post-deploy steps needed` list
+
+Then guide the user through each remaining step below.
+
+### B5–B9: Post-deploy setup
+
+Follow the steps under **"Step 5: Post-Deploy Setup"** below. The order is:
+
+1. **SSH in** with port forwarding: `./agent-manager.sh --ssh-mcp`
+2. **Log into Claude Code** (if not using API key): run `claude`, complete
+   theme + login, then `/exit`
+3. **Run `~/agent-setup.sh`** — handles brain directory and MCP registration
+4. **Authenticate MCP servers**: `cd ~/brain && claude`, then `/mcp`
+   to authenticate each server, then `/exit`
+5. **Test**: `agent run`
+
+**Rules:**
+- All post-deploy steps require SSH with port forwarding (not ttyd)
+- If Claude Code asks for theme + login, guide based on API key vs account
+- If `/mcp` shows no servers, re-run `~/agent-setup.sh`
+- After setup, ttyd (if enabled) works for day-to-day access
+
+### B10: Return to README.md for personalization
+
+When the test run completes, return to **Step 3: Personalize the agent** in
+README.md. For Option B, the user will SSH in and run `cd ~/brain && claude`
+to paste the personalization prompt.
+
+---
+
 ## Prerequisites
 
 - An AWS account
@@ -61,7 +131,7 @@ Optional:
 1. Open [AWS Console -> EC2 -> Launch Instance](https://console.aws.amazon.com/ec2/home#LaunchInstances:)
 2. Configure:
    - **Name**: `agent-server`
-   - **AMI**: Ubuntu 24.04 LTS
+   - **AMI**: Ubuntu 22.04 LTS
    - **Architecture**: x86_64
    - **Instance type**: `t3.large` (2 vCPU, 8GB RAM)
    - **Key pair**: Create new or select existing. Download the `.pem` file.
@@ -162,11 +232,11 @@ Only add the servers enabled in your `agent.conf` (ActingWeb is always needed;
 Gmail and Google Calendar are optional). Then start `claude` again and run `/mcp`
 to authenticate each one.
 
-#### Test the orchestrator
+#### Test the agent
 
 ```bash
 # Still in the SSH session:
-~/scripts/agent-orchestrator.sh --no-stop
+agent run
 ```
 
 ### Step 8: Set Up Local SSH Config
@@ -332,8 +402,9 @@ htop
 
 ### If the instance reboots
 
+- In scheduled mode with hibernation: the instance resumes from where it left off (~5-20s)
 - ttyd restarts automatically (systemd) — if configured
-- In scheduled mode: boot runner executes tasks, then stops
+- In scheduled mode without hibernation: full boot, then tasks, then stops
 - Cron jobs persist
 - Elastic IP stays attached
 - tmux sessions are lost (recreated on next SSH)

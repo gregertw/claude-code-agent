@@ -159,34 +159,90 @@ aws ec2 authorize-security-group-ingress \
   --ip-permissions "${RULES}" >/dev/null 2>/dev/null || warn "Ingress rules may already exist (continuing)"
 
 # =============================================================================
-step 3 "Find Ubuntu 24.04 AMI"
+step 3 "Create Instance Role (for self-hibernate)"
 # =============================================================================
+# The instance needs permission to hibernate itself after completing tasks.
+ROLE_NAME="agent-server-role"
+PROFILE_NAME="agent-server-profile"
+
+# Create IAM role (if not exists)
+aws iam create-role \
+  --role-name "${ROLE_NAME}" \
+  --assume-role-policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Principal": {"Service": "ec2.amazonaws.com"},
+      "Action": "sts:AssumeRole"
+    }]
+  }' \
+  --description "Allows agent server to hibernate itself" \
+  >/dev/null 2>&1 || log "IAM role already exists, reusing."
+
+# Attach inline policy for self-stop (hibernate)
+aws iam put-role-policy \
+  --role-name "${ROLE_NAME}" \
+  --policy-name "ec2-self-hibernate" \
+  --policy-document '{
+    "Version": "2012-10-17",
+    "Statement": [{
+      "Effect": "Allow",
+      "Action": ["ec2:StopInstances", "ec2:DescribeInstances"],
+      "Resource": "*",
+      "Condition": {"StringEquals": {"ec2:ResourceTag/Name": "'"${INSTANCE_NAME}"'"}}
+    }]
+  }' >/dev/null
+
+# Create instance profile (if not exists)
+aws iam create-instance-profile \
+  --instance-profile-name "${PROFILE_NAME}" >/dev/null 2>&1 || true
+
+# Add role to profile (if not already)
+aws iam add-role-to-instance-profile \
+  --instance-profile-name "${PROFILE_NAME}" \
+  --role-name "${ROLE_NAME}" >/dev/null 2>&1 || true
+
+log "Instance role configured (${ROLE_NAME})."
+
+# Wait for IAM propagation
+sleep 10
+
+# =============================================================================
+step 4 "Find Ubuntu 22.04 AMI"
+# =============================================================================
+# Using 22.04 LTS (Jammy) because it supports EC2 hibernation.
+# Ubuntu 24.04 does not yet have official hibernation support.
 AMI_ID=$(aws ec2 describe-images --region "${AWS_REGION}" \
   --owners 099720109477 \
-  --filters "Name=name,Values=ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-amd64-server-*" \
+  --filters "Name=name,Values=ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-amd64-server-*" \
              "Name=state,Values=available" \
   --query 'Images | sort_by(@, &CreationDate) | [-1].ImageId' --output text)
 log "AMI: ${AMI_ID}"
 
 # =============================================================================
-step 4 "Launch EC2 Instance"
+step 5 "Launch EC2 Instance (with hibernation)"
 # =============================================================================
+# Hibernation requires: encrypted root volume + enabled at launch.
+# This allows the instance to freeze/resume instead of full shutdown/boot,
+# cutting resume time from ~60-90s to ~5-20s.
 INSTANCE_ID=$(aws ec2 run-instances --region "${AWS_REGION}" \
   --image-id "${AMI_ID}" \
   --instance-type t3.large \
   --key-name "${KEY_NAME}" \
   --security-group-ids "${SG_ID}" \
-  --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":30,"VolumeType":"gp3"}}]' \
+  --block-device-mappings '[{"DeviceName":"/dev/sda1","Ebs":{"VolumeSize":30,"VolumeType":"gp3","Encrypted":true}}]' \
+  --hibernation-options Configured=true \
+  --iam-instance-profile Name=${PROFILE_NAME} \
   --tag-specifications "ResourceType=instance,Tags=[{Key=Name,Value=${INSTANCE_NAME}}]" \
   --query 'Instances[0].InstanceId' --output text)
-log "Instance launched: ${INSTANCE_ID}"
+log "Instance launched: ${INSTANCE_ID} (hibernation enabled)"
 
 log "Waiting for instance to be running..."
 aws ec2 wait instance-running --instance-ids "${INSTANCE_ID}" --region "${AWS_REGION}"
 log "Instance is running."
 
 # =============================================================================
-step 5 "Allocate and Associate Elastic IP"
+step 6 "Allocate and Associate Elastic IP"
 # =============================================================================
 ALLOC_ID=$(aws ec2 allocate-address --region "${AWS_REGION}" \
   --query 'AllocationId' --output text)
@@ -212,6 +268,8 @@ cat > "${STATE_FILE}" << STATEOF
   "elastic_ip": "${ELASTIC_IP}",
   "security_group_id": "${SG_ID}",
   "key_pair_name": "${KEY_NAME}",
+  "iam_role_name": "${ROLE_NAME}",
+  "iam_instance_profile_name": "${PROFILE_NAME}",
   "region": "${AWS_REGION}",
   "ssh_config_host": "${SSH_HOST}",
   "deployed_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
@@ -221,7 +279,7 @@ STATEOF
 log "State saved to deploy-state.json"
 
 # =============================================================================
-step 6 "Configure SSH"
+step 7 "Configure SSH"
 # =============================================================================
 SSH_CONFIG="${HOME}/.ssh/config"
 SSH_BLOCK="Host ${SSH_HOST}
@@ -269,7 +327,7 @@ with open('${SSH_CONFIG}', 'w') as f:
 log "SSH config updated. Use: ssh ${SSH_HOST}"
 
 # =============================================================================
-step 7 "Wait for SSH and Upload"
+step 8 "Wait for SSH and Upload"
 # =============================================================================
 log "Waiting for SSH to become available..."
 for i in $(seq 1 30); do
@@ -291,7 +349,7 @@ scp -q -r "${SCRIPT_DIR}"/* "${SSH_HOST}:~/agent-server/"
 log "Files uploaded."
 
 # =============================================================================
-step 8 "Run Server Setup"
+step 9 "Run Server Setup"
 # =============================================================================
 log "Running setup.sh on server (this takes a few minutes)..."
 set +eo pipefail
@@ -317,7 +375,7 @@ fi
 log "Server setup complete."
 
 # =============================================================================
-step 9 "Set API Key (if provided)"
+step 10 "Set API Key (if provided)"
 # =============================================================================
 if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
   ssh "${SSH_HOST}" "echo 'export ANTHROPIC_API_KEY=\"${ANTHROPIC_API_KEY}\"' > ~/.agent-env && chmod 600 ~/.agent-env"
@@ -332,7 +390,7 @@ CLAUDE_VERSION=$(ssh "${SSH_HOST}" "export PATH=\"\$HOME/.local/bin:\$PATH\" && 
 log "Claude Code ${CLAUDE_VERSION} installed on server."
 
 # =============================================================================
-step 10 "Deploy EventBridge Scheduler"
+step 11 "Deploy EventBridge Scheduler"
 # =============================================================================
 if [[ "${SCHEDULE_MODE}" == "scheduled" && "${SKIP_SCHEDULER}" == "false" ]]; then
   log "Deploying EventBridge scheduler (every ${SCHEDULE_INTERVAL} minutes)..."
@@ -376,7 +434,7 @@ POST_STEPS="${POST_STEPS}\n   cd ~/brain && claude"
 POST_STEPS="${POST_STEPS}\n   Run /mcp and authenticate each server, then /exit"
 STEP_NUM=$((STEP_NUM + 1))
 
-POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Test the orchestrator: ~/scripts/agent-orchestrator.sh --no-stop"
+POST_STEPS="${POST_STEPS}\n${STEP_NUM}. Test the agent: agent run"
 
 if [[ "${INSTALL_TTYD}" == "true" ]]; then
   POST_STEPS="${POST_STEPS}\n\n   After setup, use the web terminal at https://${ELASTIC_IP} for day-to-day access."

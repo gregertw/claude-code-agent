@@ -2,7 +2,7 @@
 # =============================================================================
 # AWS Ubuntu Agent Server — Bootstrap Script
 # =============================================================================
-# Run this on a fresh Ubuntu 24.04 LTS EC2 instance:
+# Run this on a fresh Ubuntu 22.04 LTS EC2 instance:
 #   chmod +x setup.sh && sudo ./setup.sh
 #
 # Reads configuration from agent.conf in the same directory.
@@ -443,6 +443,45 @@ else
   log "Boot runner DISABLED (always-on mode)."
 fi
 
+# Create systemd service for agent code upgrade (runs before orchestrator)
+cat > /etc/systemd/system/agent-upgrade.service << EOF
+[Unit]
+Description=Agent Code Upgrade — pulls latest from GitHub
+After=network-online.target
+Wants=network-online.target
+Before=agent-boot-runner.service
+
+[Service]
+Type=oneshot
+User=${UBUNTU_USER}
+Group=${UBUNTU_USER}
+ExecStart=${HOME_DIR}/scripts/agent-cli.sh upgrade
+Environment=HOME=${HOME_DIR}
+TimeoutStartSec=120
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+systemctl daemon-reload
+
+AUTO_UPGRADE="${AUTO_UPGRADE:-true}"
+if [[ "${AUTO_UPGRADE}" == "true" ]]; then
+  systemctl enable agent-upgrade.service
+  # Daily cron job at 4am
+  cat > /etc/cron.d/agent-upgrade << CRON
+# Auto-upgrade agent code daily
+0 4 * * * ${UBUNTU_USER} ${HOME_DIR}/scripts/agent-cli.sh upgrade >> ${HOME_DIR}/logs/upgrade.log 2>&1
+CRON
+  chmod 644 /etc/cron.d/agent-upgrade
+  log "Auto-upgrade ENABLED (boot + daily 4am cron)."
+else
+  systemctl disable agent-upgrade.service 2>/dev/null || true
+  rm -f /etc/cron.d/agent-upgrade
+  log "Auto-upgrade DISABLED."
+fi
+
 # --- 15. Schedule Mode Toggle Script ----------------------------------------
 log "Creating schedule mode toggle..."
 cat > "${HOME_DIR}/scripts/set-schedule-mode.sh" << 'TOGGLE_SCRIPT'
@@ -486,8 +525,8 @@ cat > "${HOME_DIR}/agents/README.md" << EOF
 ## Brain directory: ${BRAIN_DIR}
 
 ## Manual run
-  ~/scripts/agent-orchestrator.sh              # full run (may self-stop)
-  ~/scripts/agent-orchestrator.sh --no-stop    # full run, stays on
+  agent run                                    # full run, stays on
+  agent status                                 # show agent status
 
 ## Task Inbox
 Drop .txt or .md files in: ${BRAIN_DIR}/INBOX/
@@ -505,12 +544,19 @@ if [[ -f "${SCRIPT_DIR}/agent-cli.sh" ]]; then
   cp "${SCRIPT_DIR}/agent-cli.sh" "${HOME_DIR}/scripts/agent-cli.sh"
   chmod +x "${HOME_DIR}/scripts/agent-cli.sh"
   chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/agent-cli.sh"
-  # Install as a copy (not symlink) so permissions are independent
-  cp "${HOME_DIR}/scripts/agent-cli.sh" /usr/local/bin/agent
-  chmod +x /usr/local/bin/agent
+  # Symlink so auto-updates to ~/scripts/agent-cli.sh take effect immediately
+  ln -sf "${HOME_DIR}/scripts/agent-cli.sh" /usr/local/bin/agent
   log "Agent CLI installed. Use: agent status, agent run, agent logs, etc."
 else
   warn "agent-cli.sh not found in ${SCRIPT_DIR}. Upload it manually."
+fi
+
+# --- 17b. Dropbox Setup Script ---------------------------------------------
+if [[ -f "${SCRIPT_DIR}/setup-dropbox.sh" ]]; then
+  cp "${SCRIPT_DIR}/setup-dropbox.sh" "${HOME_DIR}/scripts/setup-dropbox.sh"
+  chmod +x "${HOME_DIR}/scripts/setup-dropbox.sh"
+  chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/setup-dropbox.sh"
+  log "Dropbox setup script copied to ~/scripts/"
 fi
 
 # --- 18. Login Banner (MOTD) -----------------------------------------------
@@ -641,11 +687,13 @@ set -euo pipefail
 
 BRAIN="\${HOME}/brain"
 
-# Try pending-templates first, fall back to agent-server/templates
+# Try pending-templates first, fall back to .agent-templates (updated by orchestrator)
 if [[ -d "\${HOME}/pending-templates" ]]; then
   TEMPLATES="\${HOME}/pending-templates"
-elif [[ -d "\${HOME}/agent-server/templates" ]]; then
-  TEMPLATES="\${HOME}/agent-server/templates"
+elif [[ -d "\${HOME}/.agent-templates" ]]; then
+  TEMPLATES="\${HOME}/.agent-templates"
+elif [[ -d "\${HOME}/.agent-repo/templates" ]]; then
+  TEMPLATES="\${HOME}/.agent-repo/templates"
 else
   echo "No templates found. Nothing to install."
   exit 0
@@ -722,6 +770,30 @@ agent-boot-runner.service: $(systemctl is-enabled agent-boot-runner.service 2>/d
 MANIFEST
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/tools-manifest.txt"
 
+# --- 21. Clone repo and clean up staging ------------------------------------
+log "Setting up agent code repo..."
+REPO_DIR="${HOME_DIR}/.agent-repo"
+REPO_URL="https://github.com/gregertw/claude-code-agent.git"
+
+if [[ ! -d "${REPO_DIR}/.git" ]]; then
+  sudo -u "${UBUNTU_USER}" git clone --depth 1 --quiet "${REPO_URL}" "${REPO_DIR}" 2>/dev/null && \
+    log "Cloned agent repo to ${REPO_DIR}" || \
+    warn "Could not clone repo (no internet?). Auto-updates will clone on first run."
+fi
+
+# Copy templates to durable location
+if [[ -d "${REPO_DIR}/templates" ]]; then
+  mkdir -p "${HOME_DIR}/.agent-templates"
+  cp "${REPO_DIR}/templates/"*.md "${HOME_DIR}/.agent-templates/" 2>/dev/null || true
+  chown -R "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/.agent-templates"
+fi
+
+# Clean up staging directory — everything is now in its permanent location
+if [[ -d "${HOME_DIR}/agent-server" ]]; then
+  rm -rf "${HOME_DIR}/agent-server"
+  log "Removed staging directory ~/agent-server/"
+fi
+
 # =============================================================================
 # Done — Print manual steps
 # =============================================================================
@@ -751,8 +823,8 @@ echo "   (Handles brain directory, MCP servers, and verification)"
 echo ""
 STEP=$((STEP + 1))
 
-echo "${STEP}. TEST THE ORCHESTRATOR"
-echo "   ~/scripts/agent-orchestrator.sh --no-stop"
+echo "${STEP}. TEST THE AGENT"
+echo "   agent run"
 echo ""
 STEP=$((STEP + 1))
 

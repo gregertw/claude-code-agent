@@ -168,9 +168,12 @@ cmd_sleep() {
     return 1
   fi
 
-  log "Stopping instance ${INSTANCE_ID}..."
-  aws ec2 stop-instances --instance-ids "${INSTANCE_ID}" --region "${REGION}" >/dev/null
-  log "Stop command sent. Instance will shut down shortly."
+  log "Hibernating instance ${INSTANCE_ID}..."
+  aws ec2 stop-instances --instance-ids "${INSTANCE_ID}" --region "${REGION}" --hibernate >/dev/null 2>&1 || {
+    warn "Hibernate not available, falling back to stop..."
+    aws ec2 stop-instances --instance-ids "${INSTANCE_ID}" --region "${REGION}" >/dev/null
+  }
+  log "Hibernate/stop command sent. Instance will freeze shortly."
 }
 
 cmd_ssh() {

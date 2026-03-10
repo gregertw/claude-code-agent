@@ -252,14 +252,25 @@ echo "============================================================"
 
 # --- 9. Self-stop (scheduled mode) -----------------------------------------
 if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && "${NO_STOP}" != "--no-stop" ]]; then
-  echo "Scheduled mode: shutting down instance in 10 seconds..."
+  echo "Scheduled mode: hibernating instance in 10 seconds..."
   echo "(Cancel with: touch ~/agents/.keep-running)"
   sleep 10
   # Final check for lock file
   if [[ -f "${HOME_DIR}/agents/.keep-running" ]]; then
-    echo "Lock file appeared. Cancelling shutdown."
+    echo "Lock file appeared. Cancelling hibernate."
   else
-    sudo shutdown -h now
+    # Hibernate preserves RAM state, resume is ~5-20s instead of ~60-90s.
+    # Requires hibernation to be enabled at instance launch (deploy.sh).
+    # Falls back to normal stop if hibernation is not available.
+    INSTANCE_ID=$(curl -s --max-time 3 http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "")
+    REGION=$(curl -s --max-time 3 http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "")
+    if [[ -n "${INSTANCE_ID}" && -n "${REGION}" ]]; then
+      echo "Hibernating instance ${INSTANCE_ID}..."
+      aws ec2 stop-instances --instance-ids "${INSTANCE_ID}" --region "${REGION}" --hibernate 2>/dev/null || sudo shutdown -h now
+    else
+      echo "Could not get instance metadata. Falling back to shutdown."
+      sudo shutdown -h now
+    fi
   fi
 else
   echo "Always-on mode (or --no-stop). Instance stays running."

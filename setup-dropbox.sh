@@ -126,50 +126,76 @@ else
   ok "Sync directory: ${DROPBOX_DIR}"
 fi
 
-# 3b. Start daemon (paused) for exclusion setup
+# 3b. Start daemon and pause for exclusion setup
+# Maestral must be paused to add excluded folders reliably.
 MAESTRAL_RUNNING=false
 if "${MAESTRAL_BIN}" status 2>/dev/null | grep -qi "^Status"; then
   MAESTRAL_RUNNING=true
-  # Pause if running so we can apply exclusions safely
-  "${MAESTRAL_BIN}" pause 2>/dev/null || true
-  ok "Maestral daemon running (paused for exclusion setup)"
 else
-  log "Starting Maestral daemon (paused)..."
+  log "Starting Maestral daemon..."
   "${MAESTRAL_BIN}" start 2>/dev/null || true
   sleep 3
-  "${MAESTRAL_BIN}" pause 2>/dev/null || true
   if "${MAESTRAL_BIN}" status 2>/dev/null | grep -qi "^Status"; then
     MAESTRAL_RUNNING=true
-    ok "Maestral started (paused)"
   else
     err "Maestral failed to start. Check: maestral status"
     exit 1
   fi
 fi
 
+log "Pausing sync for exclusion setup..."
+"${MAESTRAL_BIN}" pause 2>/dev/null || true
+ok "Maestral paused"
+
 # 3c. Apply exclusions — exclude everything except brain folder
+# Use `maestral ls -l` to get folder names with their sync status, then only
+# add exclusions for folders currently marked as syncing (✓).
 log "Querying Dropbox for folder listing..."
-REMOTE_OUTPUT=$("${MAESTRAL_BIN}" ls 2>&1 || true)
-echo "  Remote folders found:"
-echo "${REMOTE_OUTPUT}" | head -20 | sed 's/^/    /'
+LS_OUTPUT=$("${MAESTRAL_BIN}" ls -l 2>&1 || true)
+echo "  Dropbox root contents:"
+echo "${LS_OUTPUT}" | sed 's/^/    /'
+echo ""
 
 EXCLUDED=0
-while IFS= read -r item; do
-  [[ -z "$item" ]] && continue
-  item=$(echo "$item" | xargs | sed 's/\/$//')
-  [[ -z "$item" ]] && continue
+ALREADY_EXCLUDED=0
+# Parse `maestral ls -l` output. Columns: Name, Type, Size, Shared, Syncing, Last Modified
+# Skip the header line and any blank lines. We look for "folder" type entries.
+while IFS= read -r line; do
+  [[ -z "$line" ]] && continue
+  # Skip the header and separator lines
+  [[ "$line" =~ ^Name ]] && continue
+  [[ "$line" =~ ^-+$ ]] && continue
+
+  # Extract folder name (first column — everything before two or more spaces)
+  folder_name=$(echo "$line" | sed 's/  .*//' | xargs)
+  [[ -z "$folder_name" ]] && continue
+
+  # Only process folders
+  echo "$line" | grep -q "folder" || continue
+
   # Skip the brain folder — that's the one we want to sync
-  [[ "${item,,}" == "${BRAIN_FOLDER,,}" ]] && continue
-  if "${MAESTRAL_BIN}" excluded add "$item" 2>/dev/null; then
+  [[ "${folder_name,,}" == "${BRAIN_FOLDER,,}" ]] && continue
+
+  # Check sync status — skip folders already excluded
+  if echo "$line" | grep -q "excluded"; then
+    ALREADY_EXCLUDED=$((ALREADY_EXCLUDED + 1))
+    continue
+  fi
+
+  # Exclude this folder
+  if "${MAESTRAL_BIN}" excluded add "${folder_name}" 2>/dev/null; then
+    ok "Excluded: ${folder_name}"
     EXCLUDED=$((EXCLUDED + 1))
   fi
-done <<< "${REMOTE_OUTPUT}"
+done <<< "${LS_OUTPUT}"
 
 if [[ $EXCLUDED -gt 0 ]]; then
-  ok "Excluded ${EXCLUDED} folder(s) — only '${BRAIN_FOLDER}/' will sync"
-else
-  ok "Selective sync configured (only '${BRAIN_FOLDER}/' syncing)"
+  ok "Excluded ${EXCLUDED} new folder(s)"
 fi
+if [[ $ALREADY_EXCLUDED -gt 0 ]]; then
+  ok "${ALREADY_EXCLUDED} folder(s) were already excluded"
+fi
+ok "Only '${BRAIN_FOLDER}/' will sync"
 
 echo ""
 

@@ -10,104 +10,6 @@ and improves itself over time.
 You are helping a user set up an autonomous agent. Do NOT skip ahead, do NOT
 auto-fill templates, and do NOT execute steps without user confirmation.
 
-### Step 1: Ask which setup option
-
-Ask the user which option they want before doing anything else.
-Mention that it is strongly suggested to start with Option A (Local Setup)
-first. Setting up an AWS hosted instance requires more technical insight,
-including an AWS account.
-
-- **Option A: Local Setup** — Brain directory on their machine, used via Claude
-  Desktop Cowork. No cloud infrastructure. Best for trying things out.
-- **Option B: AWS EC2 Setup** — Cloud instance that runs autonomously on a
-  schedule. Best for unattended background processing.
-
-### Step 2: Open the setup guide and follow it
-
-Based on their answer, open the corresponding guide:
-
-- Option A: `docs/local-setup.md` (in this repo, or fetch from GitHub)
-- Option B: Follow the AWS guided setup below.
-
-For Option A, follow the steps in `docs/local-setup.md` sequentially.
-When you reach Step 4, you MUST give the user an explicit, copy-pasteable
-block that tells them exactly:
-1. The full path to open in Cowork (the brain directory they chose)
-2. The exact prompt to paste in the new session (from the guide's Step 4)
-Do NOT paraphrase — output the actual prompt as a code block they can copy.
-
-### AWS Guided Setup (Option B)
-
-Follow these steps **in order**, one at a time. Wait for the user to confirm
-each step before proceeding.
-
-#### B1: Check prerequisites
-
-Ask the user to confirm they have:
-
-- An **AWS account** with the **AWS CLI** installed and configured (`aws configure`)
-- **One of:**
-  - An Anthropic API key from console.anthropic.com, **or**
-  - A Claude Pro, Max, or Enterprise subscription (they will log in on the server)
-
-#### B2: Configure `agent.conf`
-
-Help the user create `agent.conf` from `agent.conf.example`. Ask them for:
-
-- `OWNER_NAME` — their name
-- `SCHEDULE_MODE` — `"always-on"` or `"scheduled"`
-- `AWS_REGION` — which AWS region (default: `eu-north-1`)
-- `INSTALL_TTYD` — want a web terminal? (`true`/`false`)
-- If ttyd: `TTYD_USER` and `TTYD_PASSWORD` (must not be `changeme`)
-- `SETUP_GMAIL` / `SETUP_GOOGLE_CALENDAR` — email/calendar integration?
-
-#### B3: Run deploy.sh
-
-If the user has an API key, tell them to set it first:
-```
-export ANTHROPIC_API_KEY="sk-ant-..."
-```
-Then tell them to run `./deploy.sh` and paste back the status output.
-
-The script is fully automated — it creates AWS resources, sets up the server,
-registers MCP servers, and deploys the scheduler. It takes a few minutes.
-
-#### B4: Review deploy status
-
-The user should paste the deploy status output back. Check it for:
-- `DEPLOY STATUS: SUCCESS`
-- Note the `Post-deploy steps needed` list
-
-Then guide the user through each remaining step below.
-
-#### B5–B9: Post-deploy setup
-
-Follow the steps in `docs/aws-setup.md` under **"Step 5: Post-Deploy Setup"**
-through **"Test the orchestrator"**. The order is:
-
-1. **SSH in** with port forwarding: `./agent-manager.sh --ssh-mcp`
-2. **Log into Claude Code** (if not using API key): run `claude`, complete
-   theme + login, then `/exit`
-3. **Run `~/agent-setup.sh`** — handles brain directory
-   and MCP registration in one pass
-4. **Authenticate MCP servers**: `cd ~/brain && claude`, then `/mcp`
-   to authenticate each server, then `/exit`
-5. **Test**: `~/scripts/agent-orchestrator.sh --no-stop`
-
-**Important rules for guiding the user:**
-- All post-deploy steps require SSH with port forwarding (not ttyd)
-- If Claude Code asks for theme + login, guide based on API key vs account
-- If `/mcp` shows no servers, re-run `~/agent-setup.sh`
-- After setup, ttyd (if enabled) works for day-to-day access
-
-#### Personalize (optional)
-
-The `personal.md` and `style.md` files are **templates with placeholders**.
-Do NOT fill them in yourself. Instead, guide the user through filling them
-in interactively. For Option B, this must be done **on the server** — SSH in
-and run Claude Code in the brain directory (`cd ~/brain && claude`)
-to edit the files there.
-
 ### Important rules
 
 - **Ask before acting.** Every step needs user input or confirmation.
@@ -124,6 +26,72 @@ to edit the files there.
   The extracted directory will be `<user-chosen-path>/claude-code-agent-main/`.
   If running in Cowork, point Cowork to that directory ("Work in a folder")
   after downloading.
+
+### Step 1: Choose setup option
+
+Ask the user which option (A or B) they want before doing anything else.
+Mention that it is strongly suggested to start with Option A (Local Setup)
+first. Setting up an AWS hosted instance requires more technical insight,
+including an AWS account.
+
+- **Option A: Local Setup** — Brain directory on their machine, used via Claude
+  Desktop Cowork. No cloud infrastructure. Best for trying things out.
+- **Option B: AWS EC2 Setup** — Cloud instance that runs autonomously on a
+  schedule. Best for unattended background processing.
+
+### Step 2: Follow the setup guide
+
+Based on their answer, open the corresponding guide and follow it step by step:
+
+- **Option A**: `docs/local-setup.md`
+- **Option B**: `docs/aws-setup.md`
+
+Each guide ends with "Return to README.md for the personalization step."
+When the user has completed all setup steps in the guide, continue here.
+
+### Step 3: Personalize the agent
+
+The `personal.md` and `style.md` files in the brain directory are **templates
+with placeholders**. Do NOT fill them in yourself. Guide the user through
+filling them in interactively using the prompt below.
+
+**Where to run this:**
+
+- **Option A**: The user should start a new **Cowork session** in Claude Desktop,
+  choose "Work in a folder", and select their brain directory. Then paste the
+  prompt below into that session. Output the full brain directory path so the
+  user knows exactly which folder to select.
+- **Option B**: The user should SSH into the server (`./agent-manager.sh --ssh`)
+  and start Claude Code in the brain directory: `cd ~/brain && claude`. Then
+  paste the prompt below.
+
+**Prompt to paste** — output this as a code block for the user to copy:
+
+```txt
+Read the instruction files in ai/instructions/ and introduce yourself.
+Then check if ActingWeb memory is connected by searching for any existing memories.
+Walk me through filling in personal.md and style.md:
+- Search ActingWeb memories for any existing personal context or preferences
+- If Gmail is connected, analyze my recent sent emails to infer my writing style
+- Then ask me questions to fill in the remaining gaps in the templates
+
+After personalization, wrap up by doing the following:
+1. Use ActingWeb's how_to_use() to get my actor_id, then give me a direct link
+   to the Context Builder: https://ai.actingweb.io/{actor_id}/app/builder
+   Explain that I can create tasks there from any device (phone, browser, another
+   AI session) and the agent will pick them up on its next run.
+2. Give me a summary of what the agent can do now — what default tasks are
+   configured, how to queue one-off tasks, and how to customize.
+```
+
+**Option A addition**: After the user pastes the prompt above, also suggest
+setting up a recurring schedule for the default tasks. Suggest a sensible
+schedule (e.g. every 2 hours on weekdays or every hour 6-22) and set it up
+if the user agrees.
+Cowork supports in-session scheduled tasks that run in the background.
+
+**After personalization is complete, you are done.** The rest of this file is
+reference material for humans — you can skip it.
 
 ---
 
@@ -268,6 +236,10 @@ This works in both Option A and Option B.
 ---
 
 ## This Package
+
+For a detailed look at how the components fit together, see
+**[ARCHITECTURE.md](ARCHITECTURE.md)** — it covers the repo layout, both setup
+paths, the server file layout after deployment, and the task execution flow.
 
 | File | Purpose |
 |---|---|

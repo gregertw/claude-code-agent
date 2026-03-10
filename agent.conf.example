@@ -1,8 +1,19 @@
 # =============================================================================
 # Agent Server Configuration
 # =============================================================================
-# Copy this file to agent.conf and fill in your values.
-# This file is sourced by all scripts in this package.
+# Copy this file to agent.conf and fill in your values before running deploy.sh.
+#
+# This file is read during initial deployment only. deploy.sh copies it to the
+# server as ~/.agent-server.conf, where it provides:
+#   - OWNER_NAME    — used in the orchestrator's Claude prompt
+#   - OUTPUT_FOLDER  — output path (output/tasks/, output/logs/, etc.)
+#   - SETUP_*        — which MCP servers to verify in agent-setup.sh
+#
+# Schedule mode is managed separately via ~/.agent-schedule on the server
+# (use agent-manager.sh --scheduled/--always-on to change it).
+#
+# After deployment, changing this file locally has NO effect on the server.
+# To change server config, edit ~/.agent-server.conf on the server directly.
 # =============================================================================
 
 # --- Identity ----------------------------------------------------------------
@@ -38,6 +49,11 @@ SCHEDULE_INTERVAL=60
 # Pick the one from AWS regions that is closest to you
 AWS_REGION="eu-north-1"
 
+# --- Agent Code Upgrade ------------------------------------------------------
+# Automatically pull latest agent code from GitHub on boot and daily?
+# Runs: agent upgrade (updates scripts and templates, not brain/ files)
+AUTO_UPGRADE=true
+
 # --- Installation Options ----------------------------------------------------
 # Linux username on the EC2 instance
 UBUNTU_USER="ubuntu"
@@ -45,7 +61,7 @@ UBUNTU_USER="ubuntu"
 # --- MCP Connections ---------------------------------------------------------
 # ActingWeb Personal AI Memory (required — provides cross-session memory)
 # Account is automatically created on first /mcp authentication
-# Authentication is handled via OAuth during setup-mcp.sh
+# Authentication is handled via OAuth during agent-setup.sh
 SETUP_ACTINGWEB=true
 
 # Gmail MCP (optional — enables email triage)

@@ -67,127 +67,56 @@ Add the following MCP servers in Claude Desktop's settings (Settings → Connect
 No Google Cloud project or OAuth credentials needed — just add the URL and
 complete the Google sign-in when prompted.
 
-## Step 4: Start a new Cowork session in your brain folder
+## Step 4: Return to README.md for personalization
 
-**Important:** You need to start a **new** Cowork session pointed at the brain
-directory. The current session (if any) was used for setup — the new session
-will work inside your brain folder where CLAUDE.md lives.
-
-1. Open Claude Desktop
-2. Start a new **Cowork** session
-3. Choose **"Work in a folder"** and select your brain directory
-4. Claude will read the `CLAUDE.md` file automatically
-
-Then paste the prompt below into the new session. It will personalize the agent,
-verify MCP connections, and set up a recurring schedule.
-
-### Prompt to paste
-
-Copy and paste this into your new Cowork session (no changes needed):
-
-```txt
-Read the instruction files in ai/instructions/ and introduce yourself.
-Then check if ActingWeb memory is connected by searching for any existing memories.
-If this is our first session, walk me through filling in personal.md and style.md:
-- Search ActingWeb memories for any existing personal context or preferences
-- If Gmail is connected, analyze my recent sent emails to infer my writing style
-- Then ask me questions to fill in the remaining gaps in the templates
-
-After personalization, wrap up by doing the following:
-1. Offer to set up a recurring schedule for the default tasks. Suggest a sensible
-   schedule (e.g. every 2 hours on weekdays) and set it up if I agree.
-2. Use ActingWeb's how_to_use() to get my actor_id, then give me a direct link
-   to the Context Builder: https://ai.actingweb.io/{actor_id}/app/builder
-   Explain that I can create tasks there from any device (phone, browser, another
-   AI session) and the agent will pick them up on its next run.
-3. Give me a summary of what the agent can do now — what default tasks are
-   configured, how to queue one-off tasks, and how to customize.
-```
+Setup is complete. Now return to the **Step 3: Personalize the agent** section
+in README.md for the common personalization step — it will guide you through
+starting a Cowork session in your brain folder and filling in `personal.md`
+and `style.md`.
 
 ---
 
 ## What's Next
 
-After setup, your agent is ready to work. Here's what it can do and how to use it.
+After personalization, your agent is ready to work. Here's a quick reference.
 
 ### Default Tasks
 
-These run automatically on every scheduled cycle (or when you say
-"Run the default task cycle now"):
+These run on every scheduled cycle (or when you say "Run the default task cycle now"):
 
 | Task | What it does | Requires |
 |---|---|---|
-| **Email Triage** | Scans your inbox for unread messages, categorizes them (actionable / FYI / spam / personal), and flags time-sensitive emails by creating summary notes in `INBOX/` | Gmail MCP |
-| **Calendar Preview** | Shows today's and tomorrow's events, flags conflicts, and researches external meeting participants | Google Calendar MCP |
-| **Inbox Folder Scan** | Checks `INBOX/` for new `.txt` and `.md` files you've dropped in, then executes them as tasks | — |
-| **ActingWeb Task Check** | Checks for tasks you've queued via the Context Builder and executes them | ActingWeb MCP |
-| **Memory Hygiene** | Runs weekly (Mondays only) — scans recent memories for duplicates or outdated entries | ActingWeb MCP |
-| **Self-Review** | Runs daily — reviews recent logs, identifies patterns, and writes improvement proposals to `output/improvements/` | ActingWeb MCP |
-| **Heartbeat Check** | Verifies the agent ran recently; warns if it's been more than 24 hours | — |
+| **Email Triage** | Scans inbox, categorizes messages, flags time-sensitive items | Gmail MCP |
+| **Calendar Preview** | Shows today's/tomorrow's events, flags conflicts | Google Calendar MCP |
+| **Inbox Folder Scan** | Executes `.txt` and `.md` files dropped in `INBOX/` | — |
+| **ActingWeb Task Check** | Executes tasks queued via the Context Builder | ActingWeb MCP |
+| **Memory Hygiene** | Weekly — scans for duplicate or outdated memories | ActingWeb MCP |
+| **Self-Review** | Daily — reviews logs, writes improvement proposals | ActingWeb MCP |
+| **Heartbeat Check** | Verifies the agent ran recently | — |
 
-Tasks that require an MCP connection you haven't set up are skipped with a warning —
-they won't cause errors.
+Tasks that require an MCP connection you haven't set up are skipped automatically.
 
-### Queue Tasks from Anywhere
+### Queue Tasks
 
-**Inbox folder**: Drop a `.txt` or `.md` file into `INBOX/` describing what you want done.
-The agent picks it up on its next run, executes it, moves the file to `INBOX/_processed/`,
-and writes results to `output/tasks/`.
+**Inbox folder**: Drop a `.txt` or `.md` file into `INBOX/` — the agent picks
+it up on its next run.
 
-```bash
-echo "Research the top 3 project management tools for small teams" > ~/brain/INBOX/research-pm-tools.txt
-```
-
-**Context Builder**: Create tasks from any device — phone, browser, or another AI session.
-Open the Context Builder at:
-
-```
-https://ai.actingweb.io/{actor_id}/app/builder
-```
-
-Find your `actor_id` by calling `how_to_use()` in any Cowork session with ActingWeb
-connected. The Context Builder wizard lets you describe what you want done and attach
-relevant memories as context. When you mark the task as ready, the agent picks it up
-on its next run via `work_on_task()`.
+**Context Builder**: Create tasks from any device at
+`https://ai.actingweb.io/{actor_id}/app/builder` (get your `actor_id` from
+`how_to_use()` in any session with ActingWeb connected).
 
 ### Recurring Schedule
 
-Cowork supports in-session scheduled tasks that run your default tasks automatically
-in the background while you work. During first-session setup, the agent will offer
-to configure this for you.
-
-Typical schedules:
-
-- **Every 2 hours on weekdays**: email triage, calendar preview, inbox scan
-- **Every morning**: full default task cycle
-- **Custom**: choose what runs and when
-
-Scheduled tasks run while your Cowork session is open. When you start a new session,
-just ask the agent to set up the schedule again, or include it in your opening prompt.
+Cowork supports in-session scheduled tasks. During personalization, the agent
+will offer to set this up. Scheduled tasks run while your Cowork session is open.
 
 ### Self-Improvement
 
-The agent reviews its own performance daily and proposes improvements. After each
-Self-Review, check `output/improvements/` for proposals — each one describes a
-specific change to an instruction file, with evidence from logs or task patterns.
-
-To act on a proposal, tell the agent in a Cowork session:
-
-```txt
-Read the latest improvement proposal in output/improvements/ and apply the changes
-I approve. Ask me about each one before making changes.
-```
-
-The agent never auto-modifies its own instructions — it always proposes and waits
-for your approval. Over time, this feedback loop makes the agent increasingly
-useful and tailored to your workflow.
+The agent reviews its performance daily and writes proposals to
+`output/improvements/`. It never auto-modifies its own instructions — it
+proposes and waits for your approval.
 
 ### Customize
 
-- **Add default tasks**: Edit `ai/instructions/default-tasks.md` to add new recurring tasks
-- **Change task rules**: Edit `ai/instructions/tasks.md` to modify execution patterns
-- **Update personal context**: Edit `ai/instructions/personal.md` as your preferences evolve
-- **Adjust writing style**: Edit `ai/instructions/style.md` to refine how the agent writes
-- **Add MCP connections**: Add Gmail, Google Calendar, or other MCP servers in Claude Desktop settings
-
-See the [Customization Guide](customization.md) for more details.
+See the [Customization Guide](customization.md) for adding tasks, MCP servers,
+and more.

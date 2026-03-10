@@ -80,7 +80,8 @@ echo "  Region:             ${REGION}"
 [[ -n "${KEY_PAIR_NAME}" ]]    && echo "  Key Pair:           ${KEY_PAIR_NAME} + ~/.ssh/${KEY_PAIR_NAME}.pem"
 [[ -n "${SSH_CONFIG_HOST}" ]]  && echo "  SSH Config Host:    ${SSH_CONFIG_HOST} (in ~/.ssh/config)"
 echo "  EventBridge:        agent-server-start scheduler"
-echo "  IAM Role:           agent-server-scheduler-role"
+echo "  IAM Roles:          agent-server-scheduler-role, agent-server-role"
+echo "  IAM Profile:        agent-server-profile"
 echo ""
 echo -e "${RED}  This action is irreversible.${NC}"
 echo ""
@@ -131,6 +132,23 @@ aws_ignore_missing aws iam delete-role-policy \
   --policy-name "ec2-start"
 aws_ignore_missing aws iam delete-role \
   --role-name "${SCHEDULER_ROLE_NAME}"
+
+# --- 2b. Delete instance IAM role and profile (for self-hibernate) ----------
+INSTANCE_ROLE_NAME="$(json_get iam_role_name)"
+INSTANCE_PROFILE_NAME="$(json_get iam_instance_profile_name)"
+INSTANCE_ROLE_NAME="${INSTANCE_ROLE_NAME:-agent-server-role}"
+INSTANCE_PROFILE_NAME="${INSTANCE_PROFILE_NAME:-agent-server-profile}"
+log "Deleting instance IAM role and profile (${INSTANCE_ROLE_NAME})..."
+aws_ignore_missing aws iam remove-role-from-instance-profile \
+  --instance-profile-name "${INSTANCE_PROFILE_NAME}" \
+  --role-name "${INSTANCE_ROLE_NAME}"
+aws_ignore_missing aws iam delete-instance-profile \
+  --instance-profile-name "${INSTANCE_PROFILE_NAME}"
+aws_ignore_missing aws iam delete-role-policy \
+  --role-name "${INSTANCE_ROLE_NAME}" \
+  --policy-name "ec2-self-hibernate"
+aws_ignore_missing aws iam delete-role \
+  --role-name "${INSTANCE_ROLE_NAME}"
 
 # --- 3. Terminate EC2 instance -----------------------------------------------
 if [[ -n "${INSTANCE_ID}" ]]; then

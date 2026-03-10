@@ -181,18 +181,53 @@ if [[ "${CLAUDE_INITIALIZED}" == "false" ]]; then
   ISSUES=$((ISSUES + 1))
 else
 
-# Check existing MCP connections
-EXISTING_MCP=""
-if command -v claude &>/dev/null; then
-  EXISTING_MCP=$(claude mcp list 2>/dev/null || true)
-fi
+# Check existing MCP connections — both local and cloud-synced
+# Local servers are in mcpServers{}, cloud-synced are in claudeAiMcpEverConnected[]
+CLAUDE_JSON="${HOME}/.claude.json"
 
-is_connected() {
-  echo "${EXISTING_MCP}" | grep -q "${1}.*Connected" 2>/dev/null
+is_registered_local() {
+  # Check if server URL appears in local mcpServers
+  python3 -c "
+import json, sys
+d = json.load(open('${CLAUDE_JSON}'))
+for s in d.get('mcpServers', {}).values():
+    if '${1}' in s.get('url', ''):
+        sys.exit(0)
+sys.exit(1)
+" 2>/dev/null
 }
 
-is_registered() {
-  echo "${EXISTING_MCP}" | grep -q "${1}" 2>/dev/null
+is_cloud_synced() {
+  # Check if server name appears in claudeAiMcpEverConnected
+  python3 -c "
+import json, sys
+d = json.load(open('${CLAUDE_JSON}'))
+for name in d.get('claudeAiMcpEverConnected', []):
+    if '${1}'.lower() in name.lower():
+        sys.exit(0)
+sys.exit(1)
+" 2>/dev/null
+}
+
+# Test if an MCP server actually works by running a minimal Claude prompt.
+# Tries both local and cloud-synced tool prefixes.
+verify_mcp() {
+  local local_prefix="$1"
+  local cloud_prefix="$2"
+  local test_prompt="$3"
+  local result
+
+  # Try with both tool prefixes — one will match depending on how the server is connected
+  result=$(cd "${BRAIN_DIR}" && claude -p "${test_prompt}" \
+    --max-turns 2 \
+    --allowedTools "${local_prefix}" "${cloud_prefix}" \
+    --output-format text 2>/dev/null) || return 1
+
+  # Check that the result doesn't contain common error indicators
+  if echo "${result}" | grep -qiE "permission denied|not authenticated|failed to connect|error.*mcp|could not|unable to"; then
+    return 1
+  fi
+  return 0
 }
 
 add_mcp_server() {
@@ -224,58 +259,61 @@ print('  Written to ' + p)
 
 MCP_NEEDS_AUTH=false
 
-# ActingWeb
-if [[ "${SETUP_ACTINGWEB}" == "true" ]]; then
-  if is_connected "ai.actingweb.io"; then
-    ok "ActingWeb: connected"
-  elif is_registered "ai.actingweb.io"; then
-    need "ActingWeb: registered but needs authentication"
-    MCP_NEEDS_AUTH=true
-  elif [[ "${VERIFY_ONLY}" == "true" ]]; then
-    need "ActingWeb: not configured"
-    ISSUES=$((ISSUES + 1))
+# Helper: register if needed (skip if cloud-synced), then verify with a real MCP call
+setup_mcp_server() {
+  local label="$1" url_pattern="$2" cloud_name="$3" local_name="$4" url="$5" port="$6"
+  local local_prefix="$7" cloud_prefix="$8" test_prompt="$9"
+
+  # Check if already available (locally registered or cloud-synced)
+  local registered=false
+  if is_registered_local "${url_pattern}"; then
+    registered=true
+  elif is_cloud_synced "${cloud_name}"; then
+    registered=true
+  fi
+
+  if [[ "${registered}" == "false" ]]; then
+    if [[ "${VERIFY_ONLY}" == "true" ]]; then
+      need "${label}: not configured"
+      ISSUES=$((ISSUES + 1))
+      return
+    fi
+    log "Registering ${label}..."
+    add_mcp_server "${local_name}" "${url}" "${port}"
+  fi
+
+  # Verify with a real MCP call
+  echo -ne "  ${DIM}  verifying ${label}...${NC}\r"
+  if verify_mcp "${local_prefix}" "${cloud_prefix}" "${test_prompt}"; then
+    ok "${label}: authenticated"
   else
-    log "Registering ActingWeb..."
-    add_mcp_server "actingweb" "https://ai.actingweb.io/mcp" 18850
-    ok "ActingWeb: registered (needs authentication)"
+    need "${label}: needs /mcp authentication"
     MCP_NEEDS_AUTH=true
   fi
+}
+
+# ActingWeb
+if [[ "${SETUP_ACTINGWEB}" == "true" ]]; then
+  setup_mcp_server "ActingWeb" "ai.actingweb.io" "Actingweb" \
+    "actingweb" "https://ai.actingweb.io/mcp" 18850 \
+    "mcp__actingweb" "mcp__claude_ai_Actingweb" \
+    "Use the ActingWeb how_to_use tool and return the result."
 fi
 
 # Gmail
 if [[ "${SETUP_GMAIL}" == "true" ]]; then
-  if is_connected "gmail.mcp.claude.com"; then
-    ok "Gmail: connected"
-  elif is_registered "gmail.mcp.claude.com"; then
-    need "Gmail: registered but needs authentication"
-    MCP_NEEDS_AUTH=true
-  elif [[ "${VERIFY_ONLY}" == "true" ]]; then
-    need "Gmail: not configured"
-    ISSUES=$((ISSUES + 1))
-  else
-    log "Registering Gmail..."
-    add_mcp_server "gmail" "https://gmail.mcp.claude.com/mcp" 18851
-    ok "Gmail: registered (needs authentication)"
-    MCP_NEEDS_AUTH=true
-  fi
+  setup_mcp_server "Gmail" "gmail.mcp.claude.com" "Gmail" \
+    "gmail" "https://gmail.mcp.claude.com/mcp" 18851 \
+    "mcp__gmail" "mcp__claude_ai_Gmail" \
+    "Use the Gmail get_profile tool and return the result."
 fi
 
 # Google Calendar
 if [[ "${SETUP_GOOGLE_CALENDAR}" == "true" ]]; then
-  if is_connected "gcal.mcp.claude.com"; then
-    ok "Google Calendar: connected"
-  elif is_registered "gcal.mcp.claude.com"; then
-    need "Google Calendar: registered but needs authentication"
-    MCP_NEEDS_AUTH=true
-  elif [[ "${VERIFY_ONLY}" == "true" ]]; then
-    need "Google Calendar: not configured"
-    ISSUES=$((ISSUES + 1))
-  else
-    log "Registering Google Calendar..."
-    add_mcp_server "google-calendar" "https://gcal.mcp.claude.com/mcp" 18852
-    ok "Google Calendar: registered (needs authentication)"
-    MCP_NEEDS_AUTH=true
-  fi
+  setup_mcp_server "Google Calendar" "gcal.mcp.claude.com" "Google Calendar" \
+    "google-calendar" "https://gcal.mcp.claude.com/mcp" 18852 \
+    "mcp__google-calendar" "mcp__claude_ai_Google_Calendar" \
+    "Use the Google Calendar list_calendars tool and return the result."
 fi
 
 fi  # end CLAUDE_INITIALIZED check
@@ -287,14 +325,14 @@ echo ""
 # =============================================================================
 echo "════════════════════════════════════════"
 
-if [[ "${VERIFY_ONLY}" == "true" ]]; then
-  if [[ $ISSUES -eq 0 && "${MCP_NEEDS_AUTH}" == "false" ]]; then
-    echo -e "${GREEN}All checks passed.${NC}"
-  else
-    echo -e "${YELLOW}${ISSUES} issue(s) found.${NC}"
-  fi
+if [[ $ISSUES -eq 0 && "${MCP_NEEDS_AUTH}" == "false" ]]; then
+  echo -e "${GREEN}Setup complete — all checks passed.${NC}"
 else
-  echo -e "${GREEN}Setup complete.${NC}"
+  if [[ "${VERIFY_ONLY}" == "true" ]]; then
+    echo -e "${YELLOW}${ISSUES} issue(s) found.${NC}"
+  else
+    echo -e "${YELLOW}Setup incomplete — see next steps below.${NC}"
+  fi
 fi
 
 # Show next steps if needed
@@ -332,9 +370,9 @@ fi
 
 echo ""
 if [[ "${NEXT_STEPS}" == "true" ]]; then
-  echo "  ${NEXT_NUM}. Test the agent: ~/scripts/agent-orchestrator.sh --no-stop"
+  echo "  ${NEXT_NUM}. Test the agent: agent run"
 else
-  echo "  Test the agent: ~/scripts/agent-orchestrator.sh --no-stop"
+  echo "  Test the agent: agent run"
 fi
 
 echo ""
