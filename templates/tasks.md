@@ -60,6 +60,23 @@ Retrieved via the ActingWeb `work_on_task` MCP tool. These are tasks created thr
 
 ---
 
+## Task Output Header
+
+Every file written to `output/tasks/` or `output/research/` must start with a feedback callout so the owner knows how to follow up. Use the file's own path and infer the task type (research, plan, draft, etc.) from context. Discover the ActingWeb actor_id via `how_to_use()` if not already known.
+
+Format:
+
+```markdown
+> **Want another look at this <type>?** Drop a file in `INBOX/` referring to this file
+> (`<output_path>`) — answer any questions below or give new guidance.
+> You can also use the [ActingWeb Context Builder](https://ai.actingweb.io/<actor_id>/app/builder) —
+> reference this file in your task prompt.
+```
+
+Place this before the document title. Keep it as a blockquote so it is visually distinct from the content.
+
+---
+
 ## Task Types
 
 Each task file or instruction can be categorized. The agent should identify the type and follow the corresponding execution pattern.

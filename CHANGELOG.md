@@ -7,6 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- Add feedback callout header to task output files — tells the owner how to iterate via INBOX or ActingWeb Context Builder
 - Add `SCHEDULE_HOURS` config variable to restrict cron runs to active hours (default `6-22`)
 - Add resume-from-hibernation systemd service — triggers orchestrator on wake, with staleness check to skip if the last run is recent enough
 - Set server timezone to match local machine during deploy
