@@ -7,6 +7,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ## [Unreleased]
 
 ### Added
+- Add `SCHEDULE_HOURS` config variable to restrict cron runs to active hours (default `6-22`)
+- Add resume-from-hibernation systemd service — triggers orchestrator on wake, with staleness check to skip if the last run is recent enough
 - Set server timezone to match local machine during deploy
 - Add MCP warm-up step to orchestrator — fires a background Claude call to initialize all MCP connections before the main run
 - Add ARCHITECTURE.md documenting repo structure, setup paths, server layout, and task execution flow
@@ -24,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Consolidate setup-mcp.sh into agent-setup.sh
 
 ### Fixed
+- Fix MCP warm-up hanging indefinitely — use `--kill-after` with timeout, `disown` the subshell, and wait 10s for connections to initialize before starting the main run
 - Fix Dropbox sync race — pause+resume maestral before waiting to force a local rescan of newly written files
 - Fix duplicate run logs — write directly to `output/logs/` instead of `~/logs/` + copy; Claude no longer writes a separate log file
 - Fix Dropbox sync check always timing out (`maestral status` output starts with a blank line)

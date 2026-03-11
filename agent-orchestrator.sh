@@ -146,14 +146,16 @@ if [[ ${#MCP_SERVERS[@]} -gt 0 ]]; then
     WARMUP_TOOLS+=("mcp__${server}")
   done
   (
-    cd "${BRAIN_DIR}" && timeout 20 claude -p \
+    cd "${BRAIN_DIR}" && timeout --kill-after=5 30 claude -p \
       "Call one tool from each available MCP server to warm up connections. Be quick, just confirm each works." \
       --max-turns 5 \
       --allowedTools "${WARMUP_TOOLS[@]}" \
       --output-format text >/dev/null 2>&1
   ) &
   WARMUP_PID=$!
-  echo "  Warm-up running (pid ${WARMUP_PID}), continuing with startup..."
+  disown ${WARMUP_PID}
+  echo "  Warm-up running (pid ${WARMUP_PID}), waiting 10s for connections..."
+  sleep 10
 else
   echo "No MCP servers configured."
 fi

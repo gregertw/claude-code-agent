@@ -434,13 +434,74 @@ RemainAfterExit=no
 WantedBy=multi-user.target
 EOF
 
+# Create systemd service to trigger orchestrator on resume from hibernation.
+# Hibernation resumes do NOT re-run boot services (multi-user.target is already
+# active) and cron does NOT catch up on missed jobs, so without this the first
+# run after wake would be up to 60 minutes later.
+# The wrapper script checks the heartbeat file — if the last run was recent
+# enough (within SCHEDULE_INTERVAL), it skips the run to avoid unnecessary
+# double-runs when wake happens mid-cycle.
+cat > ${HOME_DIR}/scripts/agent-resume-check.sh << 'RESUME_SCRIPT'
+#!/usr/bin/env bash
+# Only run the orchestrator if the last run was more than SCHEDULE_INTERVAL ago.
+set -uo pipefail
+HOME_DIR="${HOME:-/home/ubuntu}"
+source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
+source "${HOME_DIR}/.agent-server.conf" 2>/dev/null || true
+INTERVAL_SEC=$(( ${SCHEDULE_INTERVAL:-60} * 60 ))
+OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
+HEARTBEAT="${HOME_DIR}/brain/${OUTPUT_FOLDER}/.agent-heartbeat"
+
+if [[ -f "${HEARTBEAT}" ]]; then
+  LAST_RUN=$(grep '^last_run=' "${HEARTBEAT}" | cut -d= -f2)
+  if [[ -n "${LAST_RUN}" ]]; then
+    LAST_EPOCH=$(date -d "${LAST_RUN}" +%s 2>/dev/null || echo 0)
+    NOW_EPOCH=$(date +%s)
+    AGE=$(( NOW_EPOCH - LAST_EPOCH ))
+    if [[ ${AGE} -lt ${INTERVAL_SEC} ]]; then
+      echo "Resume check: last run was ${AGE}s ago (< ${INTERVAL_SEC}s). Skipping."
+      exit 0
+    fi
+    echo "Resume check: last run was ${AGE}s ago (>= ${INTERVAL_SEC}s). Running orchestrator."
+  fi
+else
+  echo "Resume check: no heartbeat file found. Running orchestrator."
+fi
+exec "${HOME_DIR}/scripts/agent-orchestrator.sh"
+RESUME_SCRIPT
+chmod +x ${HOME_DIR}/scripts/agent-resume-check.sh
+chown ${UBUNTU_USER}:${UBUNTU_USER} ${HOME_DIR}/scripts/agent-resume-check.sh
+
+cat > /etc/systemd/system/agent-resume-runner.service << EOF
+[Unit]
+Description=Agent Orchestrator — runs tasks on resume from hibernation
+After=hibernate.target suspend.target
+
+[Service]
+Type=oneshot
+User=${UBUNTU_USER}
+Group=${UBUNTU_USER}
+ExecStartPre=/bin/sleep 5
+ExecStart=${HOME_DIR}/scripts/agent-resume-check.sh
+Environment=HOME=${HOME_DIR}
+TimeoutStartSec=900
+RemainAfterExit=no
+
+[Install]
+WantedBy=hibernate.target suspend.target
+EOF
+
 systemctl daemon-reload
 if [[ "${SCHEDULE_MODE}" == "scheduled" ]]; then
   systemctl enable agent-boot-runner.service
+  systemctl enable agent-resume-runner.service
   log "Boot runner ENABLED (scheduled mode)."
+  log "Resume runner ENABLED (triggers orchestrator on wake from hibernation)."
 else
   systemctl disable agent-boot-runner.service
+  systemctl disable agent-resume-runner.service
   log "Boot runner DISABLED (always-on mode)."
+  log "Resume runner DISABLED (always-on mode)."
 fi
 
 # Create systemd service for agent code upgrade (runs before orchestrator)
@@ -492,10 +553,11 @@ fi
 # triggers (or cron + boot runner) are harmless.
 log "Installing orchestrator cron job..."
 CRON_INTERVAL="${SCHEDULE_INTERVAL:-60}"
+CRON_HOURS="${SCHEDULE_HOURS:-6-22}"
 cat > /etc/cron.d/agent-orchestrator << CRON
-# Run agent orchestrator every ${CRON_INTERVAL} minutes
+# Run agent orchestrator every ${CRON_INTERVAL} minutes during active hours
 # flock in the orchestrator prevents concurrent runs
-*/${CRON_INTERVAL} * * * * ${UBUNTU_USER} ${HOME_DIR}/scripts/agent-orchestrator.sh >> ${HOME_DIR}/logs/cron-orchestrator.log 2>&1
+*/${CRON_INTERVAL} ${CRON_HOURS} * * * ${UBUNTU_USER} ${HOME_DIR}/scripts/agent-orchestrator.sh >> ${HOME_DIR}/logs/cron-orchestrator.log 2>&1
 CRON
 chmod 644 /etc/cron.d/agent-orchestrator
 log "Orchestrator cron installed (every ${CRON_INTERVAL} min)."
@@ -522,30 +584,35 @@ if [[ -n "$INTERVAL" ]]; then
   sed -i "s/^SCHEDULE_INTERVAL=.*/SCHEDULE_INTERVAL=\"${INTERVAL}\"/" "${HOME_DIR}/.agent-schedule"
 fi
 
-# Read current interval for cron update
+# Read current interval and hours for cron update
 source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
 CRON_INTERVAL="${SCHEDULE_INTERVAL:-60}"
+CRON_HOURS="${SCHEDULE_HOURS:-6-22}"
 
-# Update orchestrator cron with current interval
+# Update orchestrator cron with current interval and hours
 sudo tee /etc/cron.d/agent-orchestrator > /dev/null << CRON
-# Run agent orchestrator every ${CRON_INTERVAL} minutes
+# Run agent orchestrator every ${CRON_INTERVAL} minutes during active hours
 # flock in the orchestrator prevents concurrent runs
-*/${CRON_INTERVAL} * * * * $(whoami) ${HOME_DIR}/scripts/agent-orchestrator.sh >> ${HOME_DIR}/logs/cron-orchestrator.log 2>&1
+*/${CRON_INTERVAL} ${CRON_HOURS} * * * $(whoami) ${HOME_DIR}/scripts/agent-orchestrator.sh >> ${HOME_DIR}/logs/cron-orchestrator.log 2>&1
 CRON
 sudo chmod 644 /etc/cron.d/agent-orchestrator
 
 if [[ "$MODE" == "scheduled" ]]; then
   systemctl enable agent-boot-runner.service
+  systemctl enable agent-resume-runner.service
   echo "Switched to SCHEDULED mode (every ${CRON_INTERVAL} min)."
   echo "  Boot runner: enabled (runs at instance start)"
+  echo "  Resume runner: enabled (runs on wake from hibernation)"
   echo "  Cron: every ${CRON_INTERVAL} min (runs while instance is up)"
   echo "  Self-stop: enabled after each run"
   echo "  Use ./agent-manager.sh --scheduled from your local machine to set up EventBridge."
   echo "  To prevent self-stop during SSH: touch ~/agents/.keep-running"
 else
   systemctl disable agent-boot-runner.service
+  systemctl disable agent-resume-runner.service
   echo "Switched to ALWAYS-ON mode (every ${CRON_INTERVAL} min)."
   echo "  Boot runner: disabled"
+  echo "  Resume runner: disabled"
   echo "  Cron: every ${CRON_INTERVAL} min"
   echo "  Self-stop: disabled"
 fi

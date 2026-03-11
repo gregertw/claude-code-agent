@@ -44,6 +44,9 @@ SCHEDULE_MODE="always-on"
 # Minutes between wakeups (only used in scheduled mode)
 SCHEDULE_INTERVAL=60
 
+# Active hours for cron (cron hour range syntax, e.g. "6-22" or "*" for all)
+SCHEDULE_HOURS="6-22"
+
 # --- AWS ---------------------------------------------------------------------
 # AWS region for the EC2 instance and EventBridge Scheduler
 # Pick the one from AWS regions that is closest to you
