@@ -8,12 +8,12 @@
 #   - agent.conf in the same directory (for AWS_REGION default)
 #
 # Usage:
-#   ./deploy-scheduler.sh <instance-id> [interval-minutes] [region]
+#   ./deploy-scheduler.sh <instance-id> [interval-minutes] [region] [hours]
 #
 # Examples:
-#   ./deploy-scheduler.sh i-0abc123def456789          # hourly, default region
-#   ./deploy-scheduler.sh i-0abc123def456789 30       # every 30 min
-#   ./deploy-scheduler.sh i-0abc123def456789 120      # every 2 hours
+#   ./deploy-scheduler.sh i-0abc123def456789              # hourly 6-22, default region
+#   ./deploy-scheduler.sh i-0abc123def456789 30           # every 30 min, 6-22
+#   ./deploy-scheduler.sh i-0abc123def456789 60 eu-north-1 8-20  # hourly, 8am-8pm
 #
 # To remove the scheduler:
 #   ./deploy-scheduler.sh --remove [region]
@@ -30,6 +30,33 @@ fi
 
 SCHEDULER_NAME="agent-server-start"
 SCHEDULER_ROLE_NAME="agent-server-scheduler-role"
+
+# --- Build EventBridge cron expression from interval + hours ----------------
+# EventBridge cron: cron(minutes hours day-of-month month day-of-week year)
+# rate() fires at arbitrary offsets and 24/7. cron() aligns with :00 and
+# restricts to active hours — matching the server-side cron job.
+build_cron_expression() {
+  local interval="$1"
+  local hours="$2"
+  if [[ "${interval}" -le 59 ]]; then
+    # Sub-hourly: use step syntax (e.g. 0/30 = :00 and :30)
+    echo "cron(0/${interval} ${hours} * * ? *)"
+  elif [[ "${interval}" -eq 60 ]]; then
+    # Hourly: fire at :00 every hour in range
+    echo "cron(0 ${hours} * * ? *)"
+  else
+    # Multi-hour: enumerate specific hours
+    local hour_start="${hours%%-*}"
+    local hour_end="${hours##*-}"
+    local hour_step=$(( interval / 60 ))
+    local hour_list=""
+    for (( h=hour_start; h<=hour_end; h+=hour_step )); do
+      [[ -n "${hour_list}" ]] && hour_list+=","
+      hour_list+="${h}"
+    done
+    echo "cron(0 ${hour_list} * * ? *)"
+  fi
+}
 
 # --- Remove mode -------------------------------------------------------------
 if [[ "${1:-}" == "--remove" ]]; then
@@ -49,13 +76,21 @@ if [[ "${1:-}" == "--remove" ]]; then
 fi
 
 # --- Create mode --------------------------------------------------------------
-INSTANCE_ID="${1:?Usage: deploy-scheduler.sh <instance-id> [interval-minutes] [region]}"
+INSTANCE_ID="${1:?Usage: deploy-scheduler.sh <instance-id> [interval-minutes] [region] [hours]}"
 INTERVAL="${2:-60}"
 REGION="${3:-${AWS_REGION:-eu-north-1}}"
+HOURS="${4:-${SCHEDULE_HOURS:-6-22}}"
+
+# Read timezone from deploy-state.json (set during deploy.sh)
+TIMEZONE="UTC"
+if [[ -f "${SCRIPT_DIR}/deploy-state.json" ]]; then
+  TIMEZONE=$(python3 -c "import json; print(json.load(open('${SCRIPT_DIR}/deploy-state.json')).get('timezone', 'UTC'))" 2>/dev/null || echo "UTC")
+fi
 
 echo "Setting up EventBridge Scheduler to start instance ${INSTANCE_ID}"
 echo "  Region: ${REGION}"
 echo "  Interval: every ${INTERVAL} minutes"
+echo "  Active hours: ${HOURS} (${TIMEZONE})"
 echo ""
 
 # Get AWS account ID
@@ -116,11 +151,15 @@ sleep 10
 SCHEDULER_ROLE_ARN="arn:aws:iam::${ACCOUNT_ID}:role/${SCHEDULER_ROLE_NAME}"
 
 # --- 2. Create EventBridge Schedule ------------------------------------------
+CRON_EXPR=$(build_cron_expression "${INTERVAL}" "${HOURS}")
 echo "Creating EventBridge Schedule..."
+echo "  Expression: ${CRON_EXPR}"
+echo "  Timezone: ${TIMEZONE}"
 
 aws scheduler create-schedule \
   --name "$SCHEDULER_NAME" \
-  --schedule-expression "rate(${INTERVAL} minutes)" \
+  --schedule-expression "${CRON_EXPR}" \
+  --schedule-expression-timezone "${TIMEZONE}" \
   --target "{
     \"Arn\": \"arn:aws:scheduler:::aws-sdk:ec2:startInstances\",
     \"RoleArn\": \"${SCHEDULER_ROLE_ARN}\",
@@ -132,7 +171,8 @@ aws scheduler create-schedule \
   2>/dev/null || \
 aws scheduler update-schedule \
   --name "$SCHEDULER_NAME" \
-  --schedule-expression "rate(${INTERVAL} minutes)" \
+  --schedule-expression "${CRON_EXPR}" \
+  --schedule-expression-timezone "${TIMEZONE}" \
   --target "{
     \"Arn\": \"arn:aws:scheduler:::aws-sdk:ec2:startInstances\",
     \"RoleArn\": \"${SCHEDULER_ROLE_ARN}\",
@@ -150,13 +190,13 @@ echo "============================================================"
 echo " SCHEDULER DEPLOYED"
 echo "============================================================"
 echo ""
-echo "Instance ${INSTANCE_ID} will be started every ${INTERVAL} minutes."
-echo "The instance self-stops after running tasks (if SCHEDULE_MODE=scheduled)."
+echo "Instance ${INSTANCE_ID} will be started on schedule:"
+echo "  Expression:   ${CRON_EXPR}"
+echo "  Timezone:     ${TIMEZONE}"
+echo "  Active hours: ${HOURS}"
+echo "  Interval:     every ${INTERVAL} minutes"
 echo ""
-echo "Estimated monthly cost:"
-echo "  ~10-15 min runtime/hr x \$0.0834/hr = ~\$12-18/month compute"
-echo "  + EBS: \$2.40/month + Elastic IP: \$3.65/month"
-echo "  Total: ~\$18-24/month"
+echo "The instance self-stops after running tasks (if SCHEDULE_MODE=scheduled)."
 echo ""
 echo "To pause:  aws scheduler update-schedule --name ${SCHEDULER_NAME} --state DISABLED --region ${REGION} ..."
 echo "To remove: ./deploy-scheduler.sh --remove"

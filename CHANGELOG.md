@@ -17,14 +17,23 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Add flock-based locking to the orchestrator to prevent concurrent runs
 - Copy setup-dropbox.sh into ~/scripts/ during server setup
 - Wait for Dropbox sync to complete before self-stopping the instance (polls maestral status, 120s timeout)
+- Add `--run-agent` command to agent-manager.sh — wake instance and trigger an orchestrator run (fire and forget)
+- Add `--history [N]` command to agent-manager.sh — ASCII timeline of wake/sleep/run activity using CloudWatch metrics and server logs
+- Add active-hours guard to orchestrator and resume-check — self-stop immediately if woken outside `SCHEDULE_HOURS`
+- Add shared `agent-functions.sh` with `do_hibernate()` and `check_active_hours()` for use by multiple server scripts
+- Add pre-flight tool check to agent-manager.sh — verify aws, python3, ssh, scp are available at startup
 
 ### Changed
 - Consolidate run logs to single location (`output/logs/`) — remove `~/logs/` copy step, update CLI to read from brain dir
 - Rewrite Dropbox selective sync to pause maestral, parse `maestral ls -l` output for sync status, and skip already-excluded folders
 - Update quick-start prompt to tell AI to download the zip directly instead of web-fetching GitHub
 - Link ARCHITECTURE.md from the reference section in README.md
-- Update set-schedule-mode.sh to accept an optional interval argument and update the cron job when switching modes
+- Update set-schedule-mode.sh to accept optional interval and hours arguments, update cron and report both server and client-side schedule status
 - Consolidate setup-mcp.sh into agent-setup.sh
+- Switch EventBridge scheduler from `rate()` to `cron()` expressions with active hours and timezone — aligns wake-ups with server-side cron
+- Move server-side scripts into `scripts/` directory in the repo, keeping deploy/manager scripts in root
+- Extract 4 inline heredoc scripts from setup.sh into standalone files — independently testable and covered by auto-upgrade
+- Update `agent upgrade` command to pull server scripts from `scripts/` subdirectory in the repo
 
 ### Fixed
 - Fix MCP warm-up hanging indefinitely — use `--kill-after` with timeout, `disown` the subshell, and wait 10s for connections to initialize before starting the main run
@@ -33,6 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Fix Dropbox sync check always timing out (`maestral status` output starts with a blank line)
 - Fix orchestrator not running periodically when instance stays up (boot runner only fires once)
 - Fix Dropbox setup failing to exclude folders because maestral was not paused during exclusion changes
+- Fix set-schedule-mode.sh failing under sudo — detect `SUDO_USER` to resolve correct home directory
 
 ### Removed
 - Remove setup-mcp.sh (functionality merged into agent-setup.sh)

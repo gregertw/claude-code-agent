@@ -29,6 +29,12 @@ ORCHESTRATOR_LOG="${ORCH_LOG_DIR}/orchestrator-${TIMESTAMP}.log"
 NO_STOP="${1:-}"
 LOCK_FILE="${HOME_DIR}/.agent-orchestrator.lock"
 
+# --- Source shared functions --------------------------------------------------
+# Contains do_hibernate() and check_active_hours().
+if [[ -f "${SCRIPTS_DIR}/agent-functions.sh" ]]; then
+  source "${SCRIPTS_DIR}/agent-functions.sh"
+fi
+
 # --- Lock: prevent concurrent runs ------------------------------------------
 # Use a lock file with flock to ensure only one orchestrator runs at a time.
 # If another instance is already running, exit silently (cron will retry next interval).
@@ -57,6 +63,19 @@ if [[ -f "${AGENT_CONF}" ]]; then
   source "${AGENT_CONF}"
 else
   echo "WARNING: ${AGENT_CONF} not found. Using defaults."
+fi
+
+# --- Active-hours guard (scheduled mode only) --------------------------------
+# If running in scheduled mode outside active hours, skip the run and self-stop.
+# This prevents the server from staying awake if woken by a stale schedule,
+# manual start, or hibernation resume outside active hours.
+if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && "${NO_STOP}" != "--no-stop" ]]; then
+  if ! check_active_hours "${SCHEDULE_HOURS:-6-22}"; then
+    echo "Outside active hours (${SCHEDULE_HOURS:-6-22}, current: $(date +%-H)). Skipping run."
+    do_hibernate "Outside active hours"
+    exit 0
+  fi
+  echo "Active hours check: OK (${SCHEDULE_HOURS:-6-22}, current: $(date +%-H))"
 fi
 
 # Derive paths from config
@@ -329,18 +348,7 @@ if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && "${NO_STOP}" != "--no-stop
   if [[ -f "${HOME_DIR}/agents/.keep-running" ]]; then
     echo "Lock file appeared. Cancelling hibernate."
   else
-    # Hibernate preserves RAM state, resume is ~5-20s instead of ~60-90s.
-    # Requires hibernation to be enabled at instance launch (deploy.sh).
-    # Falls back to normal stop if hibernation is not available.
-    INSTANCE_ID=$(curl -s --max-time 3 http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "")
-    REGION=$(curl -s --max-time 3 http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "")
-    if [[ -n "${INSTANCE_ID}" && -n "${REGION}" ]]; then
-      echo "Hibernating instance ${INSTANCE_ID}..."
-      aws ec2 stop-instances --instance-ids "${INSTANCE_ID}" --region "${REGION}" --hibernate 2>/dev/null || sudo shutdown -h now
-    else
-      echo "Could not get instance metadata. Falling back to shutdown."
-      sudo shutdown -h now
-    fi
+    do_hibernate "Scheduled mode self-stop"
   fi
 else
   echo "Always-on mode (or --no-stop). Instance stays running."

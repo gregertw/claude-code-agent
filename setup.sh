@@ -12,6 +12,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SERVER_SCRIPTS="${SCRIPT_DIR}/scripts"
 CONF_FILE="${SCRIPT_DIR}/agent.conf"
 
 # --- Load configuration ------------------------------------------------------
@@ -276,10 +277,15 @@ cp "${CONF_FILE}" "${HOME_DIR}/.agent-server.conf"
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/.agent-server.conf"
 
 # Create schedule mode config file
+# Detect server timezone for schedule alignment
+SERVER_TZ=$(timedatectl show --property=Timezone --value 2>/dev/null || echo "UTC")
+
 cat > "${HOME_DIR}/.agent-schedule" << EOF
 # Agent Server Schedule Mode
 SCHEDULE_MODE="${SCHEDULE_MODE}"
 SCHEDULE_INTERVAL="${SCHEDULE_INTERVAL}"
+SCHEDULE_HOURS="${SCHEDULE_HOURS:-6-22}"
+SCHEDULE_TZ="${SERVER_TZ}"
 EOF
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/.agent-schedule"
 
@@ -377,40 +383,32 @@ log "Claude Code permissions configured."
 
 # --- 14. Agent Orchestrator --------------------------------------------------
 log "Installing agent orchestrator..."
-if [[ -f "${SCRIPT_DIR}/agent-orchestrator.sh" ]]; then
-  cp "${SCRIPT_DIR}/agent-orchestrator.sh" "${HOME_DIR}/scripts/agent-orchestrator.sh"
+if [[ -f "${SERVER_SCRIPTS}/agent-orchestrator.sh" ]]; then
+  cp "${SERVER_SCRIPTS}/agent-orchestrator.sh" "${HOME_DIR}/scripts/agent-orchestrator.sh"
   log "Orchestrator copied to ~/scripts/"
 else
-  warn "agent-orchestrator.sh not found in ${SCRIPT_DIR}. Upload it manually to ~/scripts/"
+  warn "agent-orchestrator.sh not found in ${SERVER_SCRIPTS}. Upload it manually to ~/scripts/"
 fi
 chmod +x "${HOME_DIR}/scripts/agent-orchestrator.sh" 2>/dev/null || true
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/agent-orchestrator.sh" 2>/dev/null || true
 
-# Create agent runner helper
-log "Creating agent runner helper script..."
-cat > "${HOME_DIR}/scripts/run-agent.sh" << 'AGENT_SCRIPT'
-#!/usr/bin/env bash
-# Run a Claude Code agent task with logging
-# Usage: ./run-agent.sh "Your prompt here" [working-directory]
+# Copy shared functions (sourced by orchestrator and resume-check)
+if [[ -f "${SERVER_SCRIPTS}/agent-functions.sh" ]]; then
+  cp "${SERVER_SCRIPTS}/agent-functions.sh" "${HOME_DIR}/scripts/agent-functions.sh"
+  log "Shared functions copied to ~/scripts/"
+else
+  warn "agent-functions.sh not found in ${SERVER_SCRIPTS}."
+fi
+chmod +x "${HOME_DIR}/scripts/agent-functions.sh" 2>/dev/null || true
+chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/agent-functions.sh" 2>/dev/null || true
 
-set -euo pipefail
-
-PROMPT="${1:?Usage: run-agent.sh \"prompt\" [working-dir]}"
-WORKDIR="${2:-$HOME/agents}"
-TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-LOGFILE="$HOME/logs/agent-${TIMESTAMP}.log"
-
-[[ -z "${ANTHROPIC_API_KEY:-}" ]] && source ~/.agent-env 2>/dev/null
-
-echo "[$(date)] Starting agent in ${WORKDIR}" | tee -a "${LOGFILE}"
-echo "[$(date)] Prompt: ${PROMPT}" | tee -a "${LOGFILE}"
-
-cd "${WORKDIR}"
-claude -p "${PROMPT}" --max-turns 50 2>&1 | tee -a "${LOGFILE}"
-
-echo "[$(date)] Agent finished." | tee -a "${LOGFILE}"
-AGENT_SCRIPT
-
+# Copy agent runner helper
+log "Installing agent runner helper script..."
+if [[ -f "${SERVER_SCRIPTS}/run-agent.sh" ]]; then
+  cp "${SERVER_SCRIPTS}/run-agent.sh" "${HOME_DIR}/scripts/run-agent.sh"
+else
+  warn "run-agent.sh not found in ${SERVER_SCRIPTS}."
+fi
 chmod +x "${HOME_DIR}/scripts/run-agent.sh"
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/run-agent.sh"
 
@@ -441,36 +439,13 @@ EOF
 # The wrapper script checks the heartbeat file — if the last run was recent
 # enough (within SCHEDULE_INTERVAL), it skips the run to avoid unnecessary
 # double-runs when wake happens mid-cycle.
-cat > ${HOME_DIR}/scripts/agent-resume-check.sh << 'RESUME_SCRIPT'
-#!/usr/bin/env bash
-# Only run the orchestrator if the last run was more than SCHEDULE_INTERVAL ago.
-set -uo pipefail
-HOME_DIR="${HOME:-/home/ubuntu}"
-source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
-source "${HOME_DIR}/.agent-server.conf" 2>/dev/null || true
-INTERVAL_SEC=$(( ${SCHEDULE_INTERVAL:-60} * 60 ))
-OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
-HEARTBEAT="${HOME_DIR}/brain/${OUTPUT_FOLDER}/.agent-heartbeat"
-
-if [[ -f "${HEARTBEAT}" ]]; then
-  LAST_RUN=$(grep '^last_run=' "${HEARTBEAT}" | cut -d= -f2)
-  if [[ -n "${LAST_RUN}" ]]; then
-    LAST_EPOCH=$(date -d "${LAST_RUN}" +%s 2>/dev/null || echo 0)
-    NOW_EPOCH=$(date +%s)
-    AGE=$(( NOW_EPOCH - LAST_EPOCH ))
-    if [[ ${AGE} -lt ${INTERVAL_SEC} ]]; then
-      echo "Resume check: last run was ${AGE}s ago (< ${INTERVAL_SEC}s). Skipping."
-      exit 0
-    fi
-    echo "Resume check: last run was ${AGE}s ago (>= ${INTERVAL_SEC}s). Running orchestrator."
-  fi
+if [[ -f "${SERVER_SCRIPTS}/agent-resume-check.sh" ]]; then
+  cp "${SERVER_SCRIPTS}/agent-resume-check.sh" "${HOME_DIR}/scripts/agent-resume-check.sh"
 else
-  echo "Resume check: no heartbeat file found. Running orchestrator."
+  warn "agent-resume-check.sh not found in ${SERVER_SCRIPTS}."
 fi
-exec "${HOME_DIR}/scripts/agent-orchestrator.sh"
-RESUME_SCRIPT
-chmod +x ${HOME_DIR}/scripts/agent-resume-check.sh
-chown ${UBUNTU_USER}:${UBUNTU_USER} ${HOME_DIR}/scripts/agent-resume-check.sh
+chmod +x "${HOME_DIR}/scripts/agent-resume-check.sh"
+chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/agent-resume-check.sh"
 
 cat > /etc/systemd/system/agent-resume-runner.service << EOF
 [Unit]
@@ -563,64 +538,12 @@ chmod 644 /etc/cron.d/agent-orchestrator
 log "Orchestrator cron installed (every ${CRON_INTERVAL} min)."
 
 # --- 15. Schedule Mode Toggle Script ----------------------------------------
-log "Creating schedule mode toggle..."
-cat > "${HOME_DIR}/scripts/set-schedule-mode.sh" << 'TOGGLE_SCRIPT'
-#!/usr/bin/env bash
-set -euo pipefail
-
-MODE="${1:?Usage: set-schedule-mode.sh <always-on|scheduled>}"
-HOME_DIR="/home/ubuntu"
-
-if [[ "$MODE" != "always-on" && "$MODE" != "scheduled" ]]; then
-  echo "ERROR: Mode must be 'always-on' or 'scheduled'"
-  exit 1
-fi
-
-sed -i "s/^SCHEDULE_MODE=.*/SCHEDULE_MODE=\"${MODE}\"/" "${HOME_DIR}/.agent-schedule"
-
-# Update cron interval if provided
-INTERVAL="${2:-}"
-if [[ -n "$INTERVAL" ]]; then
-  sed -i "s/^SCHEDULE_INTERVAL=.*/SCHEDULE_INTERVAL=\"${INTERVAL}\"/" "${HOME_DIR}/.agent-schedule"
-fi
-
-# Read current interval and hours for cron update
-source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
-CRON_INTERVAL="${SCHEDULE_INTERVAL:-60}"
-CRON_HOURS="${SCHEDULE_HOURS:-6-22}"
-
-# Update orchestrator cron with current interval and hours
-sudo tee /etc/cron.d/agent-orchestrator > /dev/null << CRON
-# Run agent orchestrator every ${CRON_INTERVAL} minutes during active hours
-# flock in the orchestrator prevents concurrent runs
-*/${CRON_INTERVAL} ${CRON_HOURS} * * * $(whoami) ${HOME_DIR}/scripts/agent-orchestrator.sh >> ${HOME_DIR}/logs/cron-orchestrator.log 2>&1
-CRON
-sudo chmod 644 /etc/cron.d/agent-orchestrator
-
-if [[ "$MODE" == "scheduled" ]]; then
-  systemctl enable agent-boot-runner.service
-  systemctl enable agent-resume-runner.service
-  echo "Switched to SCHEDULED mode (every ${CRON_INTERVAL} min)."
-  echo "  Boot runner: enabled (runs at instance start)"
-  echo "  Resume runner: enabled (runs on wake from hibernation)"
-  echo "  Cron: every ${CRON_INTERVAL} min (runs while instance is up)"
-  echo "  Self-stop: enabled after each run"
-  echo "  Use ./agent-manager.sh --scheduled from your local machine to set up EventBridge."
-  echo "  To prevent self-stop during SSH: touch ~/agents/.keep-running"
+log "Installing schedule mode toggle..."
+if [[ -f "${SERVER_SCRIPTS}/set-schedule-mode.sh" ]]; then
+  cp "${SERVER_SCRIPTS}/set-schedule-mode.sh" "${HOME_DIR}/scripts/set-schedule-mode.sh"
 else
-  systemctl disable agent-boot-runner.service
-  systemctl disable agent-resume-runner.service
-  echo "Switched to ALWAYS-ON mode (every ${CRON_INTERVAL} min)."
-  echo "  Boot runner: disabled"
-  echo "  Resume runner: disabled"
-  echo "  Cron: every ${CRON_INTERVAL} min"
-  echo "  Self-stop: disabled"
+  warn "set-schedule-mode.sh not found in ${SERVER_SCRIPTS}."
 fi
-
-echo ""
-cat "${HOME_DIR}/.agent-schedule"
-TOGGLE_SCRIPT
-
 chmod +x "${HOME_DIR}/scripts/set-schedule-mode.sh"
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/set-schedule-mode.sh"
 
@@ -647,20 +570,20 @@ chown -R "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/agents"
 
 # --- 17. Agent CLI Helper ---------------------------------------------------
 log "Installing agent CLI helper..."
-if [[ -f "${SCRIPT_DIR}/agent-cli.sh" ]]; then
-  cp "${SCRIPT_DIR}/agent-cli.sh" "${HOME_DIR}/scripts/agent-cli.sh"
+if [[ -f "${SERVER_SCRIPTS}/agent-cli.sh" ]]; then
+  cp "${SERVER_SCRIPTS}/agent-cli.sh" "${HOME_DIR}/scripts/agent-cli.sh"
   chmod +x "${HOME_DIR}/scripts/agent-cli.sh"
   chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/agent-cli.sh"
   # Symlink so auto-updates to ~/scripts/agent-cli.sh take effect immediately
   ln -sf "${HOME_DIR}/scripts/agent-cli.sh" /usr/local/bin/agent
   log "Agent CLI installed. Use: agent status, agent run, agent logs, etc."
 else
-  warn "agent-cli.sh not found in ${SCRIPT_DIR}. Upload it manually."
+  warn "agent-cli.sh not found in ${SERVER_SCRIPTS}. Upload it manually."
 fi
 
 # --- 17b. Dropbox Setup Script ---------------------------------------------
-if [[ -f "${SCRIPT_DIR}/setup-dropbox.sh" ]]; then
-  cp "${SCRIPT_DIR}/setup-dropbox.sh" "${HOME_DIR}/scripts/setup-dropbox.sh"
+if [[ -f "${SERVER_SCRIPTS}/setup-dropbox.sh" ]]; then
+  cp "${SERVER_SCRIPTS}/setup-dropbox.sh" "${HOME_DIR}/scripts/setup-dropbox.sh"
   chmod +x "${HOME_DIR}/scripts/setup-dropbox.sh"
   chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/setup-dropbox.sh"
   log "Dropbox setup script copied to ~/scripts/"
@@ -758,8 +681,8 @@ log "Login banner installed."
 log "Installing template files..."
 
 # Copy agent-setup.sh (unified post-deploy setup)
-if [[ -f "${SCRIPT_DIR}/agent-setup.sh" ]]; then
-  cp "${SCRIPT_DIR}/agent-setup.sh" "${HOME_DIR}/agent-setup.sh"
+if [[ -f "${SERVER_SCRIPTS}/agent-setup.sh" ]]; then
+  cp "${SERVER_SCRIPTS}/agent-setup.sh" "${HOME_DIR}/agent-setup.sh"
   chmod +x "${HOME_DIR}/agent-setup.sh"
   chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/agent-setup.sh"
   log "agent-setup.sh copied to home directory."
@@ -784,62 +707,12 @@ if [[ -d "${TEMPLATES_DIR}" ]]; then
   done
 fi
 
-# Create template installer script (useful for re-installing)
-cat > "${HOME_DIR}/scripts/install-templates.sh" << INSTALL_TMPL
-#!/usr/bin/env bash
-# Install template files into the brain directory.
-# Usage: ./install-templates.sh
-
-set -euo pipefail
-
-BRAIN="\${HOME}/brain"
-
-# Try pending-templates first, fall back to .agent-templates (updated by orchestrator)
-if [[ -d "\${HOME}/pending-templates" ]]; then
-  TEMPLATES="\${HOME}/pending-templates"
-elif [[ -d "\${HOME}/.agent-templates" ]]; then
-  TEMPLATES="\${HOME}/.agent-templates"
-elif [[ -d "\${HOME}/.agent-repo/templates" ]]; then
-  TEMPLATES="\${HOME}/.agent-repo/templates"
+# Copy template installer script (useful for re-installing)
+if [[ -f "${SERVER_SCRIPTS}/install-templates.sh" ]]; then
+  cp "${SERVER_SCRIPTS}/install-templates.sh" "${HOME_DIR}/scripts/install-templates.sh"
 else
-  echo "No templates found. Nothing to install."
-  exit 0
+  warn "install-templates.sh not found in ${SERVER_SCRIPTS}."
 fi
-
-if [[ ! -d "\${BRAIN}" ]]; then
-  echo "ERROR: \${BRAIN} not found."
-  exit 1
-fi
-
-source "\${HOME}/.agent-server.conf" 2>/dev/null || true
-OUTPUT_FOLDER="\${OUTPUT_FOLDER:-output}"
-
-mkdir -p "\${BRAIN}/ai/instructions"
-mkdir -p "\${BRAIN}/INBOX/_processed"
-mkdir -p "\${BRAIN}/\${OUTPUT_FOLDER}/tasks"
-mkdir -p "\${BRAIN}/\${OUTPUT_FOLDER}/logs"
-mkdir -p "\${BRAIN}/\${OUTPUT_FOLDER}/research"
-mkdir -p "\${BRAIN}/\${OUTPUT_FOLDER}/improvements"
-
-for f in "\${TEMPLATES}"/*.md; do
-  [[ ! -f "\$f" ]] && continue
-  BASENAME=\$(basename "\$f")
-  if [[ "\$BASENAME" == "CLAUDE.md" ]]; then
-    TARGET="\${BRAIN}/CLAUDE.md"
-  else
-    TARGET="\${BRAIN}/ai/instructions/\${BASENAME}"
-  fi
-  if [[ ! -f "\${TARGET}" ]]; then
-    cp "\$f" "\${TARGET}"
-    echo "  Installed: \${TARGET}"
-  else
-    echo "  Skipped (exists): \${TARGET}"
-  fi
-done
-
-echo ""
-echo "Done. You can remove ~/pending-templates/ now."
-INSTALL_TMPL
 chmod +x "${HOME_DIR}/scripts/install-templates.sh"
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/install-templates.sh"
 

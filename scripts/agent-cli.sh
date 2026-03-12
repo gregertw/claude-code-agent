@@ -749,12 +749,13 @@ cmd_upgrade() {
     fi
   fi
 
-  # Update scripts
+  # Update scripts (server-side scripts live in scripts/ in the repo)
+  local REPO_SCRIPTS="${REPO_DIR}/scripts"
   local updated=0
-  for script in agent-orchestrator.sh agent-cli.sh; do
-    if [[ -f "${REPO_DIR}/${script}" ]]; then
-      if ! cmp -s "${REPO_DIR}/${script}" "${SCRIPTS}/${script}" 2>/dev/null; then
-        cp "${REPO_DIR}/${script}" "${SCRIPTS}/${script}"
+  for script in agent-orchestrator.sh agent-cli.sh agent-functions.sh agent-resume-check.sh set-schedule-mode.sh run-agent.sh install-templates.sh setup-dropbox.sh; do
+    if [[ -f "${REPO_SCRIPTS}/${script}" ]]; then
+      if ! cmp -s "${REPO_SCRIPTS}/${script}" "${SCRIPTS}/${script}" 2>/dev/null; then
+        cp "${REPO_SCRIPTS}/${script}" "${SCRIPTS}/${script}"
         chmod +x "${SCRIPTS}/${script}"
         updated=$((updated + 1))
         echo -e "  ${GREEN}✓${NC} ${script}"
@@ -762,10 +763,10 @@ cmd_upgrade() {
     fi
   done
 
-  # agent-setup.sh
-  if [[ -f "${REPO_DIR}/agent-setup.sh" ]]; then
-    if ! cmp -s "${REPO_DIR}/agent-setup.sh" "${HOME}/agent-setup.sh" 2>/dev/null; then
-      cp "${REPO_DIR}/agent-setup.sh" "${HOME}/agent-setup.sh"
+  # agent-setup.sh (lives in scripts/ in repo, installed to ~/agent-setup.sh)
+  if [[ -f "${REPO_SCRIPTS}/agent-setup.sh" ]]; then
+    if ! cmp -s "${REPO_SCRIPTS}/agent-setup.sh" "${HOME}/agent-setup.sh" 2>/dev/null; then
+      cp "${REPO_SCRIPTS}/agent-setup.sh" "${HOME}/agent-setup.sh"
       chmod +x "${HOME}/agent-setup.sh"
       updated=$((updated + 1))
       echo -e "  ${GREEN}✓${NC} agent-setup.sh"

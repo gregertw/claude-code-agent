@@ -353,8 +353,21 @@ LOCAL_TZ=$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
 if [[ -n "${LOCAL_TZ}" ]]; then
   ssh "${SSH_HOST}" "sudo timedatectl set-timezone '${LOCAL_TZ}'"
   log "Timezone set to ${LOCAL_TZ}"
+  # Store timezone in deploy-state.json for scheduler alignment
+  python3 -c "
+import json
+with open('${STATE_FILE}') as f: d = json.load(f)
+d['timezone'] = '${LOCAL_TZ}'
+with open('${STATE_FILE}', 'w') as f: json.dump(d, f, indent=2)
+"
 else
   warn "Could not detect local timezone — server will use UTC."
+  python3 -c "
+import json
+with open('${STATE_FILE}') as f: d = json.load(f)
+d['timezone'] = 'UTC'
+with open('${STATE_FILE}', 'w') as f: json.dump(d, f, indent=2)
+"
 fi
 
 # =============================================================================
