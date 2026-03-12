@@ -54,16 +54,17 @@ echo "=== Agent Orchestrator started at $(date) ==="
 
 # Load environment
 source "${HOME_DIR}/.agent-env" 2>/dev/null || true
-source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
 export PATH="${HOME_DIR}/.local/bin:${HOME_DIR}/.cargo/bin:/usr/local/bin:$PATH"
 
-# Load agent.conf (installed during setup)
+# Load agent.conf (installed during setup) — provides defaults
 AGENT_CONF="${HOME_DIR}/.agent-server.conf"
 if [[ -f "${AGENT_CONF}" ]]; then
   source "${AGENT_CONF}"
 else
   echo "WARNING: ${AGENT_CONF} not found. Using defaults."
 fi
+# Source schedule AFTER agent.conf so SCHEDULE_* from set-schedule-mode.sh wins
+source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
 
 # --- Active-hours guard (scheduled mode only) --------------------------------
 # If running in scheduled mode outside active hours, skip the run and self-stop.
@@ -132,6 +133,10 @@ fi
 
 # Ensure INBOX and _processed dirs exist
 mkdir -p "${INBOX_DIR}/_processed" 2>/dev/null || true
+
+# --- 2b. Wait for Dropbox sync before running Claude -------------------------
+# Ensures all remote changes (tasks, instructions) are available locally.
+wait_for_dropbox_sync "${HOME_DIR}"
 
 # --- 3. MCP warm-up ----------------------------------------------------------
 # Fire a quick Claude call that touches MCP servers to wake up connections.
@@ -313,47 +318,8 @@ fi
 echo ""
 echo "============================================================"
 
-# --- 9. Wait for Dropbox sync (if Maestral is installed) -------------------
-MAESTRAL_BIN="${HOME_DIR}/.local/bin/maestral"
-if [[ -x "${MAESTRAL_BIN}" ]]; then
-  # Wait for maestral daemon to be reachable (may still be starting after resume)
-  echo "Checking Dropbox sync (maestral)..."
-  MAESTRAL_READY=false
-  for i in $(seq 1 12); do
-    if "${MAESTRAL_BIN}" status &>/dev/null; then
-      MAESTRAL_READY=true
-      break
-    fi
-    echo "  Waiting for maestral daemon... (attempt ${i})"
-    sleep 5
-  done
-
-  if [[ "${MAESTRAL_READY}" == "true" ]]; then
-    # Kick maestral to rescan local changes — avoids a race where status reports
-    # "Up to date" before it notices newly written files.
-    "${MAESTRAL_BIN}" pause >/dev/null 2>&1 || true
-    sleep 1
-    "${MAESTRAL_BIN}" resume >/dev/null 2>&1 || true
-    sleep 2
-    echo "Waiting for Dropbox sync to complete..."
-    SYNC_WAIT=0
-    SYNC_TIMEOUT=120
-    while [[ ${SYNC_WAIT} -lt ${SYNC_TIMEOUT} ]]; do
-      SYNC_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null || echo "")
-      if echo "${SYNC_STATUS}" | grep -qi "up to date\|idle"; then
-        echo "Dropbox sync complete."
-        break
-      fi
-      sleep 5
-      SYNC_WAIT=$((SYNC_WAIT + 5))
-    done
-    if [[ ${SYNC_WAIT} -ge ${SYNC_TIMEOUT} ]]; then
-      echo "WARNING: Dropbox sync did not complete within ${SYNC_TIMEOUT}s. Proceeding anyway."
-    fi
-  else
-    echo "WARNING: Maestral daemon not reachable after 60s. Skipping Dropbox sync."
-  fi
-fi
+# --- 9. Wait for Dropbox sync (upload results before stopping) --------------
+wait_for_dropbox_sync "${HOME_DIR}"
 
 # --- 10. Self-stop (scheduled mode) ----------------------------------------
 if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && "${NO_STOP}" != "--no-stop" ]]; then

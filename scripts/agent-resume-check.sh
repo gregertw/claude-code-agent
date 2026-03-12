@@ -8,8 +8,9 @@
 
 set -uo pipefail
 HOME_DIR="${HOME:-/home/ubuntu}"
-source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
 source "${HOME_DIR}/.agent-server.conf" 2>/dev/null || true
+# Source schedule AFTER agent.conf so SCHEDULE_* from set-schedule-mode.sh wins
+source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
 SCRIPTS_DIR="${HOME_DIR}/scripts"
 
 # Source shared functions
@@ -24,8 +25,12 @@ if ! check_active_hours "${SCHEDULE_HOURS:-6-22}"; then
   exit 0
 fi
 
-# Heartbeat interval check
+# Heartbeat interval check — use 80% of interval to account for boot time
+# and the fact that the heartbeat records completion time, not start time.
+# E.g. 60min interval → threshold 48min, so a run completing at :01 won't
+# block the next wake at :00 of the following hour.
 INTERVAL_SEC=$(( ${SCHEDULE_INTERVAL:-60} * 60 ))
+THRESHOLD_SEC=$(( INTERVAL_SEC * 80 / 100 ))
 OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
 HEARTBEAT="${HOME_DIR}/brain/${OUTPUT_FOLDER}/.agent-heartbeat"
 
@@ -35,11 +40,11 @@ if [[ -f "${HEARTBEAT}" ]]; then
     LAST_EPOCH=$(date -d "${LAST_RUN}" +%s 2>/dev/null || echo 0)
     NOW_EPOCH=$(date +%s)
     AGE=$(( NOW_EPOCH - LAST_EPOCH ))
-    if [[ ${AGE} -lt ${INTERVAL_SEC} ]]; then
-      echo "Resume check: last run was ${AGE}s ago (< ${INTERVAL_SEC}s). Skipping."
+    if [[ ${AGE} -lt ${THRESHOLD_SEC} ]]; then
+      echo "Resume check: last run was ${AGE}s ago (< ${THRESHOLD_SEC}s threshold). Skipping."
       exit 0
     fi
-    echo "Resume check: last run was ${AGE}s ago (>= ${INTERVAL_SEC}s). Running orchestrator."
+    echo "Resume check: last run was ${AGE}s ago (>= ${THRESHOLD_SEC}s threshold). Running orchestrator."
   fi
 else
   echo "Resume check: no heartbeat file found. Running orchestrator."
