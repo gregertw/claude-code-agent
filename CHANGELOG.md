@@ -45,6 +45,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Fix Dropbox setup failing to exclude folders because maestral was not paused during exclusion changes
 - Fix set-schedule-mode.sh failing under sudo — detect `SUDO_USER` to resolve correct home directory
 - Fix cron job running as root instead of ubuntu when set-schedule-mode.sh is called via sudo
+- Fix `--run-agent` falsely reporting orchestrator already running — `pgrep` matched its own SSH command; use flock check instead
+- Fix Dropbox sync skipped after hibernate resume — maestral daemon not ready yet; wait up to 60s for daemon before syncing
 
 ### Removed
 - Remove setup-mcp.sh (functionality merged into agent-setup.sh)

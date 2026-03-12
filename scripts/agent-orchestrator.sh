@@ -313,29 +313,45 @@ fi
 echo ""
 echo "============================================================"
 
-# --- 9. Wait for Dropbox sync (if Maestral is running) ---------------------
+# --- 9. Wait for Dropbox sync (if Maestral is installed) -------------------
 MAESTRAL_BIN="${HOME_DIR}/.local/bin/maestral"
-if command -v "${MAESTRAL_BIN}" &>/dev/null && "${MAESTRAL_BIN}" status &>/dev/null; then
-  # Kick maestral to rescan local changes — avoids a race where status reports
-  # "Up to date" before it notices newly written files.
-  "${MAESTRAL_BIN}" pause >/dev/null 2>&1 || true
-  sleep 1
-  "${MAESTRAL_BIN}" resume >/dev/null 2>&1 || true
-  sleep 2
-  echo "Waiting for Dropbox sync to complete..."
-  SYNC_WAIT=0
-  SYNC_TIMEOUT=120
-  while [[ ${SYNC_WAIT} -lt ${SYNC_TIMEOUT} ]]; do
-    SYNC_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null || echo "")
-    if echo "${SYNC_STATUS}" | grep -qi "up to date\|idle"; then
-      echo "Dropbox sync complete."
+if [[ -x "${MAESTRAL_BIN}" ]]; then
+  # Wait for maestral daemon to be reachable (may still be starting after resume)
+  echo "Checking Dropbox sync (maestral)..."
+  MAESTRAL_READY=false
+  for i in $(seq 1 12); do
+    if "${MAESTRAL_BIN}" status &>/dev/null; then
+      MAESTRAL_READY=true
       break
     fi
+    echo "  Waiting for maestral daemon... (attempt ${i})"
     sleep 5
-    SYNC_WAIT=$((SYNC_WAIT + 5))
   done
-  if [[ ${SYNC_WAIT} -ge ${SYNC_TIMEOUT} ]]; then
-    echo "WARNING: Dropbox sync did not complete within ${SYNC_TIMEOUT}s. Proceeding anyway."
+
+  if [[ "${MAESTRAL_READY}" == "true" ]]; then
+    # Kick maestral to rescan local changes — avoids a race where status reports
+    # "Up to date" before it notices newly written files.
+    "${MAESTRAL_BIN}" pause >/dev/null 2>&1 || true
+    sleep 1
+    "${MAESTRAL_BIN}" resume >/dev/null 2>&1 || true
+    sleep 2
+    echo "Waiting for Dropbox sync to complete..."
+    SYNC_WAIT=0
+    SYNC_TIMEOUT=120
+    while [[ ${SYNC_WAIT} -lt ${SYNC_TIMEOUT} ]]; do
+      SYNC_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null || echo "")
+      if echo "${SYNC_STATUS}" | grep -qi "up to date\|idle"; then
+        echo "Dropbox sync complete."
+        break
+      fi
+      sleep 5
+      SYNC_WAIT=$((SYNC_WAIT + 5))
+    done
+    if [[ ${SYNC_WAIT} -ge ${SYNC_TIMEOUT} ]]; then
+      echo "WARNING: Dropbox sync did not complete within ${SYNC_TIMEOUT}s. Proceeding anyway."
+    fi
+  else
+    echo "WARNING: Maestral daemon not reachable after 60s. Skipping Dropbox sync."
   fi
 fi
 
