@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Add active-hours guard to orchestrator and resume-check — self-stop immediately if woken outside `SCHEDULE_HOURS`
 - Add shared `agent-functions.sh` with `do_hibernate()` and `check_active_hours()` for use by multiple server scripts
 - Add pre-flight tool check to agent-manager.sh — verify aws, python3, ssh, scp are available at startup
+- Add `--log [N]` command to agent-manager.sh — show Nth most recent orchestrator and agent run log
 
 ### Changed
 - Consolidate run logs to single location (`output/logs/`) — remove `~/logs/` copy step, update CLI to read from brain dir
@@ -43,6 +44,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Fix orchestrator not running periodically when instance stays up (boot runner only fires once)
 - Fix Dropbox setup failing to exclude folders because maestral was not paused during exclusion changes
 - Fix set-schedule-mode.sh failing under sudo — detect `SUDO_USER` to resolve correct home directory
+- Fix cron job running as root instead of ubuntu when set-schedule-mode.sh is called via sudo
 
 ### Removed
 - Remove setup-mcp.sh (functionality merged into agent-setup.sh)

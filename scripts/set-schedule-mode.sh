@@ -40,12 +40,13 @@ fi
 source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
 CRON_INTERVAL="${SCHEDULE_INTERVAL:-60}"
 CRON_HOURS="${SCHEDULE_HOURS:-6-22}"
+CRON_USER="${SUDO_USER:-$(whoami)}"
 
 # Update orchestrator cron
 sudo tee /etc/cron.d/agent-orchestrator > /dev/null << CRON
 # Run agent orchestrator every ${CRON_INTERVAL} minutes during active hours
 # flock in the orchestrator prevents concurrent runs
-*/${CRON_INTERVAL} ${CRON_HOURS} * * * $(whoami) ${HOME_DIR}/scripts/agent-orchestrator.sh >> ${HOME_DIR}/logs/cron-orchestrator.log 2>&1
+*/${CRON_INTERVAL} ${CRON_HOURS} * * * ${CRON_USER} ${HOME_DIR}/scripts/agent-orchestrator.sh >> ${HOME_DIR}/logs/cron-orchestrator.log 2>&1
 CRON
 sudo chmod 644 /etc/cron.d/agent-orchestrator
 

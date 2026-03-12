@@ -10,6 +10,7 @@
 #   ./agent-manager.sh --scheduled [N] [H]  Switch to scheduled mode (every N min, hours H, default 60/6-22)
 #   ./agent-manager.sh --run-agent     Trigger an agent run (fire and forget)
 #   ./agent-manager.sh --history [N]   Show wake/sleep/run timeline (last N days, default 7)
+#   ./agent-manager.sh --log [N]       Show Nth most recent orchestrator log (default: latest)
 #   ./agent-manager.sh --ssh           SSH into the server
 #   ./agent-manager.sh --ssh-mcp       SSH with MCP port forwarding (for auth)
 #   ./agent-manager.sh --help          Show this help
@@ -125,7 +126,7 @@ cmd_status() {
   fi
 
   echo ""
-  echo -e "  ${DIM}Commands: --wakeup, --sleep, --run-agent, --history, --scheduled, --ssh${NC}"
+  echo -e "  ${DIM}Commands: --wakeup, --sleep, --run-agent, --log, --history, --scheduled, --ssh${NC}"
   echo ""
 }
 
@@ -302,11 +303,12 @@ cmd_run_agent() {
     cmd_wakeup
   fi
 
-  # Check if orchestrator is already running
-  local existing_pid
-  existing_pid=$(ssh -o ConnectTimeout=5 "${SSH_HOST}" "pgrep -f 'agent-orchestrator.sh' 2>/dev/null" || echo "")
-  if [[ -n "${existing_pid}" ]]; then
-    warn "Orchestrator is already running (pid ${existing_pid})."
+  # Check if orchestrator is already running (test via its flock)
+  local lock_held
+  lock_held=$(ssh -o ConnectTimeout=5 "${SSH_HOST}" \
+    "flock -n ~/.agent-orchestrator.lock true 2>/dev/null && echo free || echo held" || echo "free")
+  if [[ "${lock_held}" == "held" ]]; then
+    warn "Orchestrator is already running."
     echo -e "  Monitor: ${CYAN}ssh ${SSH_HOST} 'tail -f ~/logs/orchestrator-*.log'${NC}"
     return 0
   fi
@@ -317,12 +319,13 @@ cmd_run_agent() {
   pid=$(ssh -o ConnectTimeout=5 "${SSH_HOST}" \
     "nohup ~/scripts/agent-orchestrator.sh </dev/null >> ~/logs/cron-orchestrator.log 2>&1 & echo \$!" 2>/dev/null)
 
-  # Brief wait, then confirm
+  # Brief wait, then confirm via lock
   sleep 2
   local running
-  running=$(ssh -o ConnectTimeout=5 "${SSH_HOST}" "pgrep -f 'agent-orchestrator.sh' 2>/dev/null" || echo "")
-  if [[ -n "${running}" ]]; then
-    log "Orchestrator started (pid ${running})."
+  running=$(ssh -o ConnectTimeout=5 "${SSH_HOST}" \
+    "flock -n ~/.agent-orchestrator.lock true 2>/dev/null && echo free || echo held" || echo "free")
+  if [[ "${running}" == "held" ]]; then
+    log "Orchestrator started."
     echo ""
     echo -e "  The agent is running in the background."
     if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" ]]; then
@@ -592,6 +595,44 @@ PYEOF
   rm -f "${cw_file}" "${run_file}"
 }
 
+cmd_log() {
+  local n="${1:-1}"
+  local state
+  state=$(get_instance_state)
+
+  if [[ "${state}" != "running" ]]; then
+    err "Instance is ${state}. Use --wakeup first."
+    return 1
+  fi
+
+  # Get the Nth most recent orchestrator log and the run log it references
+  local log_output
+  log_output=$(ssh -o ConnectTimeout=5 "${SSH_HOST}" "
+    LOG=\$(ls -1t ~/logs/orchestrator-*.log 2>/dev/null | sed -n '${n}p')
+    if [[ -z \"\${LOG}\" ]]; then
+      echo 'ERROR: No orchestrator log #${n} found.'
+      exit 1
+    fi
+    echo \"=== \$(basename \"\${LOG}\") ===\"
+    echo ''
+    cat \"\${LOG}\"
+
+    # Also show the agent run log if referenced
+    RUN_LOG=\$(grep -oP 'Run log: \\K.*' \"\${LOG}\" 2>/dev/null | head -1)
+    if [[ -n \"\${RUN_LOG}\" && -f \"\${RUN_LOG}\" ]]; then
+      echo ''
+      echo \"=== Agent Run Log: \$(basename \"\${RUN_LOG}\") ===\"
+      echo ''
+      cat \"\${RUN_LOG}\"
+    fi
+  " 2>/dev/null) || {
+    err "Could not fetch log from server."
+    return 1
+  }
+
+  echo "${log_output}"
+}
+
 cmd_help() {
   echo ""
   echo -e "${BOLD}agent-manager${NC} — Manage your agent server"
@@ -607,6 +648,8 @@ cmd_help() {
   echo -e "  ${CYAN}./agent-manager.sh --run-agent${NC}  Trigger an agent run (fire and forget)"
   echo -e "  ${CYAN}./agent-manager.sh --history${NC}   Show wake/sleep/run timeline (last 7 days)"
   echo -e "  ${CYAN}./agent-manager.sh --history 14${NC} Timeline for the last 14 days"
+  echo -e "  ${CYAN}./agent-manager.sh --log${NC}       Show latest orchestrator log"
+  echo -e "  ${CYAN}./agent-manager.sh --log 3${NC}     Show 3rd most recent log"
   echo -e "  ${CYAN}./agent-manager.sh --ssh${NC}        SSH into the server"
   echo -e "  ${CYAN}./agent-manager.sh --ssh-mcp${NC}    SSH with MCP port forwarding (for auth)"
   echo -e "  ${CYAN}./agent-manager.sh --help${NC}       Show this help"
@@ -624,6 +667,7 @@ case "${1:---status}" in
   --scheduled|scheduled)     cmd_scheduled "${2:-60}" "${3:-}" ;;
   --run-agent|run-agent)     cmd_run_agent ;;
   --history|history)         cmd_history "${2:-7}" ;;
+  --log|log)                 cmd_log "${2:-1}" ;;
   --ssh|ssh)           cmd_ssh ;;
   --ssh-mcp|ssh-mcp)   cmd_ssh_mcp ;;
   --help|-h|help)      cmd_help ;;
