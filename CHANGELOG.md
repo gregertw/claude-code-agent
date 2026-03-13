@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## 2026-03-13
+
+### Added
+
+- Add CloudTrail fallback for `--history` — show run counts and events even when server is stopped
+- Distinguish scheduled runs from manual wakeups in `--history` using CloudTrail userAgent
+
+### Changed
+
+- Mark run counts as estimated (`~`) when using CloudTrail fallback instead of server logs
+
+### Fixed
+
+- Fix Dropbox post-run sync reporting complete before files are actually uploaded — verify individual file status after global sync
+- Increase post-resume sleep from 2s to 5s to give Maestral time to detect new files
+
 ## 2026-03-12
 
 ### Added

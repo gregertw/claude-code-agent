@@ -20,11 +20,13 @@ do_hibernate() {
 }
 
 # Wait for Dropbox sync via Maestral. Waits for daemon readiness, kicks a rescan,
-# then polls until "Up to date" / "Idle" or timeout.
+# then polls until "Up to date" / "Idle" or timeout. After global status reports
+# complete, verifies no individual files under brain/ are still uploading.
 # Usage: wait_for_dropbox_sync [home_dir]
 wait_for_dropbox_sync() {
   local home_dir="${1:-${HOME:-/home/ubuntu}}"
   local maestral_bin="${home_dir}/.local/bin/maestral"
+  local brain_dir="${home_dir}/brain"
 
   if [[ ! -x "${maestral_bin}" ]]; then
     return 0
@@ -59,7 +61,11 @@ wait_for_dropbox_sync() {
   timeout 10 "${maestral_bin}" pause >/dev/null 2>&1 || true
   sleep 1
   timeout 10 "${maestral_bin}" resume >/dev/null 2>&1 || true
-  sleep 2
+
+  # Wait long enough for Maestral's filesystem scan to detect new/changed files.
+  # 2s was not enough — Maestral can report "Up to date" before it picks up changes.
+  sleep 5
+
   echo "Waiting for Dropbox sync to complete..."
   local sync_wait=0
   local sync_timeout=120
@@ -67,13 +73,44 @@ wait_for_dropbox_sync() {
     local sync_status
     sync_status=$(timeout 10 "${maestral_bin}" status 2>/dev/null || echo "")
     if echo "${sync_status}" | grep -qi "up to date\|idle"; then
-      echo "Dropbox sync complete."
-      return 0
+      break
     fi
     sleep 5
     sync_wait=$((sync_wait + 5))
   done
-  echo "WARNING: Dropbox sync did not complete within ${sync_timeout}s. Proceeding anyway."
+
+  if [[ ${sync_wait} -ge ${sync_timeout} ]]; then
+    echo "WARNING: Dropbox sync did not complete within ${sync_timeout}s. Proceeding anyway."
+    return 0
+  fi
+
+  # Global status says "Up to date" but individual files may still be uploading.
+  # Check recently modified files under brain/ to catch the race condition where
+  # Maestral hasn't indexed a newly written file yet.
+  local file_timeout=60
+  local file_wait=0
+  local pending
+  while [[ ${file_wait} -lt ${file_timeout} ]]; do
+    pending=""
+    # Check files modified in the last 10 minutes
+    while IFS= read -r f; do
+      local fstatus
+      fstatus=$(timeout 10 "${maestral_bin}" filestatus "${f}" 2>/dev/null || echo "")
+      if echo "${fstatus}" | grep -qi "uploading\|syncing"; then
+        pending="${pending} $(basename "${f}")"
+      fi
+    done < <(find "${brain_dir}" -type f -mmin -10 2>/dev/null)
+
+    if [[ -z "${pending}" ]]; then
+      echo "Dropbox sync complete."
+      return 0
+    fi
+    echo "  Waiting for file uploads:${pending}"
+    sleep 5
+    file_wait=$((file_wait + 5))
+  done
+
+  echo "WARNING: Some files still uploading after ${file_timeout}s:${pending}"
   return 0
 }
 

@@ -384,19 +384,24 @@ cmd_history() {
     --region "${REGION}" \
     --output json > "${cw_file}" 2>/dev/null || echo '{"Datapoints":[]}' > "${cw_file}"
 
-  # Get orchestrator run timestamps from server (if running)
+  # Get orchestrator run timestamps and events.
+  # Primary: SSH to server for detailed logs (if running).
+  # Fallback: CloudTrail Start/Stop events (always available, even when stopped).
   local run_file events_file
   run_file=$(mktemp)
   events_file=$(mktemp)
   local state
   state=$(get_instance_state)
+  local got_ssh_data=false
   if [[ "${state}" == "running" ]]; then
-    ssh -o ConnectTimeout=5 "${SSH_HOST}" \
+    if ssh -o ConnectTimeout=5 "${SSH_HOST}" \
       "ls -1 ~/logs/orchestrator-*.log 2>/dev/null | sed 's/.*orchestrator-//' | sed 's/\.log//' | tail -500" \
-      > "${run_file}" 2>/dev/null || true
+      > "${run_file}" 2>/dev/null; then
+      got_ssh_data=true
+    fi
 
     # For single-day view, get detailed event timestamps from logs
-    if [[ "${days}" -eq 1 ]]; then
+    if [[ "${got_ssh_data}" == "true" && "${days}" -eq 1 ]]; then
       local today_str
       today_str=$(date +%Y%m%d)
       ssh -o ConnectTimeout=10 "${SSH_HOST}" "
@@ -414,6 +419,124 @@ cmd_history() {
       " > "${events_file}" 2>/dev/null || true
     fi
   fi
+
+  # Fallback: use CloudTrail Start/Stop events to infer runs when SSH unavailable.
+  # A StartInstances→StopInstances pair within a short window = one agent run.
+  local ct_file
+  ct_file=$(mktemp)
+  if [[ "${got_ssh_data}" != "true" ]]; then
+    # Fetch StartInstances and StopInstances events from CloudTrail
+    aws cloudtrail lookup-events \
+      --lookup-attributes "AttributeKey=ResourceName,AttributeValue=${INSTANCE_ID}" \
+      --start-time "${start_time}" \
+      --end-time "${end_time}" \
+      --max-results 200 \
+      --region "${REGION}" \
+      --output json > "${ct_file}" 2>/dev/null || echo '{"Events":[]}' > "${ct_file}"
+
+    # Convert CloudTrail events into run timestamps and event details.
+    # Timestamps are converted to the server's local timezone so the rendering
+    # code (which treats them as naive local times) displays correct hours.
+    python3 - "${ct_file}" "${run_file}" "${events_file}" "${days}" "${tz_name}" << 'CT_PYEOF'
+import json, sys
+from datetime import datetime, timezone
+
+ct_file, run_file, events_file, days_str, tz_name = sys.argv[1:6]
+days = int(days_str)
+
+try:
+    from zoneinfo import ZoneInfo
+    local_tz = ZoneInfo(tz_name)
+except (ImportError, KeyError):
+    local_tz = timezone.utc
+
+with open(ct_file) as f:
+    ct_data = json.load(f)
+
+scheduled_starts = []  # EventBridge-triggered (= agent ran)
+manual_starts = []     # Manual wakeups (= awake but no agent run)
+stops = []
+
+def parse_ts(ts):
+    if isinstance(ts, str):
+        for fmt in ("%Y-%m-%dT%H:%M:%S%z", "%Y-%m-%dT%H:%M:%SZ"):
+            try:
+                dt = datetime.strptime(ts, fmt)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt.astimezone(local_tz)
+            except ValueError:
+                continue
+    elif isinstance(ts, (int, float)):
+        return datetime.fromtimestamp(ts, tz=timezone.utc).astimezone(local_tz)
+    return None
+
+for ev in ct_data.get("Events", []):
+    name = ev.get("EventName", "")
+    dt = parse_ts(ev.get("EventTime", ""))
+    if dt is None:
+        continue
+    if name == "StartInstances":
+        # Distinguish scheduler-triggered starts from manual wakeups.
+        # EventBridge starts have "AmazonEventBridgeScheduler" in userAgent.
+        ce = json.loads(ev.get("CloudTrailEvent", "{}"))
+        ua = ce.get("userAgent", "")
+        if "EventBridge" in ua or "Scheduler" in ua:
+            scheduled_starts.append(dt)
+        else:
+            manual_starts.append(dt)
+    elif name == "StopInstances":
+        stops.append(dt)
+
+scheduled_starts.sort()
+manual_starts.sort()
+stops.sort()
+all_starts = sorted(scheduled_starts + manual_starts)
+
+# Filter to only the requested date range (local time)
+from datetime import timedelta
+now_local = datetime.now(local_tz)
+date_start = (now_local - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
+scheduled_starts = [s for s in scheduled_starts if s >= date_start]
+manual_starts = [s for s in manual_starts if s >= date_start]
+all_starts = [s for s in all_starts if s >= date_start]
+stops = [s for s in stops if s >= date_start]
+
+# Write scheduled run timestamps (matching orchestrator log filename format).
+# Manual wakeups are written with an "AWAKE:" prefix so the rendering code
+# can add them to the awake set instead of the runs set.
+# First line "SOURCE:cloudtrail" signals estimated data.
+with open(run_file, "w") as rf:
+    rf.write("SOURCE:cloudtrail\n")
+    for s in scheduled_starts:
+        rf.write(s.strftime("%Y%m%d-%H%M%S") + "\n")
+    for s in manual_starts:
+        rf.write("AWAKE:" + s.strftime("%Y%m%d-%H%M%S") + "\n")
+
+# For single-day view, build event pairs sorted chronologically
+if days == 1:
+    today_str = now_local.strftime("%Y-%m-%d")
+    today_starts = [s for s in all_starts if s.strftime("%Y-%m-%d") == today_str]
+    is_scheduled = set(s.strftime("%Y%m%d-%H%M%S") for s in scheduled_starts)
+    with open(events_file, "w") as ef:
+        for s in today_starts:
+            ts_str = s.strftime('%Y%m%d-%H%M%S')
+            if ts_str in is_scheduled:
+                ef.write(f"START:{ts_str}\n")
+            else:
+                ef.write(f"WAKEUP:{ts_str}\n")
+            # Find the closest stop after this start
+            matching_stop = None
+            for st in stops:
+                if st > s:
+                    matching_stop = st
+                    break
+            if matching_stop:
+                ef.write(f"ENDTIME:{int(matching_stop.timestamp())}\n")
+                ef.write("hibernating instance\n")
+CT_PYEOF
+  fi
+  rm -f "${ct_file}"
 
   # Render timeline with python3
   python3 - "${days}" "${cw_file}" "${run_file}" "${tz_name}" "${events_file}" << 'PYEOF'
@@ -459,19 +582,30 @@ for dp in cw_raw.get("Datapoints", []):
     if ds in display_dates:
         awake.add((ds, local_dt.hour))
 
-# Parse orchestrator log filenames → set of (date_str, hour) + count per day
+# Parse orchestrator log filenames → set of (date_str, hour) + count per day.
+# Lines prefixed with "AWAKE:" are manual wakeups (no agent run) from CloudTrail.
+# A "SOURCE:cloudtrail" header means run counts are estimated (no SSH access).
 runs = set()
 from collections import Counter
 runs_per_day = Counter()
+estimated = False
 for line in run_raw.split("\n"):
     line = line.strip()
-    if len(line) >= 15:
+    if line == "SOURCE:cloudtrail":
+        estimated = True
+        continue
+    is_awake_only = line.startswith("AWAKE:")
+    ts_str = line[6:] if is_awake_only else line
+    if len(ts_str) >= 15:
         try:
-            dt = datetime.strptime(line[:15], "%Y%m%d-%H%M%S")
+            dt = datetime.strptime(ts_str[:15], "%Y%m%d-%H%M%S")
             ds = dt.strftime("%Y-%m-%d")
             if ds in display_dates:
-                runs.add((ds, dt.hour))
-                runs_per_day[ds] += 1
+                if is_awake_only:
+                    awake.add((ds, dt.hour))
+                else:
+                    runs.add((ds, dt.hour))
+                    runs_per_day[ds] += 1
         except ValueError:
             pass
 
@@ -502,7 +636,8 @@ for d in range(days - 1, -1, -1):
         else:
             bar += f"{D}··{NC}"
     rc = runs_per_day.get(ds, 0)
-    suffix = f"  {D}{rc} run{'s' if rc != 1 else ''}{NC}" if rc > 0 else ""
+    prefix = "~" if estimated and rc > 0 else ""
+    suffix = f"  {D}{prefix}{rc} run{'s' if rc != 1 else ''}{NC}" if rc > 0 else ""
     print(f"  {label}  {bar}{suffix}")
 
 # Hour axis
@@ -518,11 +653,14 @@ print(f"  {G}██{NC} agent ran   {Y}░░{NC} awake (idle)   {D}··{NC} sto
 total_active_hours = len(awake)
 total_run_hours = len(runs)
 total_runs = sum(runs_per_day.values())
+est_prefix = "~" if estimated else ""
 print()
-print(f"  Hours with wake-ups: {total_active_hours}  |  Total runs: {total_runs}")
+print(f"  Hours with wake-ups: {total_active_hours}  |  Total runs: {est_prefix}{total_runs}")
 if total_active_hours > 0 and total_active_hours != total_run_hours:
     idle_hours = total_active_hours - total_run_hours
     print(f"  Hours idle (awake, no run): {idle_hours}")
+if estimated:
+    print(f"  {D}(run counts estimated from CloudTrail — start server for exact counts){NC}")
 
 # --- Detailed event timeline (single-day only) ------------------------------
 if days == 1 and events_file:
@@ -539,8 +677,9 @@ if days == 1 and events_file:
 
         for line in raw.split("\n"):
             line = line.strip()
-            if line.startswith("START:"):
-                ts_str = line[6:]
+            if line.startswith("START:") or line.startswith("WAKEUP:"):
+                is_manual = line.startswith("WAKEUP:")
+                ts_str = line.split(":", 1)[1]
                 try:
                     dt = datetime.strptime(ts_str[:15], "%Y%m%d-%H%M%S")
                     hm = dt.strftime("%H:%M")
@@ -549,7 +688,10 @@ if days == 1 and events_file:
                         events.append((hm, "▲", "instance woke up"))
                     current_start = hm
                     end_hm = None
-                    events.append((hm, "▶", "orchestrator started"))
+                    if is_manual:
+                        events.append((hm, "○", "manual wakeup (no agent run)"))
+                    else:
+                        events.append((hm, "▶", "orchestrator started"))
                 except ValueError:
                     pass
             elif line.startswith("ENDTIME:"):
@@ -576,7 +718,7 @@ if days == 1 and events_file:
             print(f"  {B}Events{NC}")
             print(f"  {'─' * 40}")
             for hm, sym, desc in events:
-                if sym == "▲":
+                if sym == "▲" or sym == "○":
                     color = Y
                 elif sym == "▶" or sym == "■":
                     color = G
@@ -586,13 +728,13 @@ if days == 1 and events_file:
             print()
     elif not raw:
         print()
-        print(f"  {D}(no detailed log data — server may be stopped){NC}")
+        print(f"  {D}(no detailed event data for today){NC}")
         print()
 
 print()
 PYEOF
 
-  rm -f "${cw_file}" "${run_file}"
+  rm -f "${cw_file}" "${run_file}" "${events_file}"
 }
 
 cmd_log() {
