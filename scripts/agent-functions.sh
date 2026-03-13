@@ -19,28 +19,36 @@ do_hibernate() {
   fi
 }
 
-# Wait for Dropbox sync via Maestral. Waits for daemon readiness, kicks a rescan,
-# then polls until "Up to date" / "Idle" or timeout. After global status reports
-# complete, verifies no individual files under brain/ are still uploading.
-# Usage: wait_for_dropbox_sync [home_dir]
-wait_for_dropbox_sync() {
+# Start Maestral daemon fresh. Called at the beginning of an orchestrator run.
+# By starting/stopping per-run instead of running continuously, we avoid all
+# hibernation recovery issues (daemon unreachable, stale state, etc.).
+# Usage: start_dropbox_sync [home_dir]
+start_dropbox_sync() {
   local home_dir="${1:-${HOME:-/home/ubuntu}}"
   local maestral_bin="${home_dir}/.local/bin/maestral"
-  local brain_dir="${home_dir}/brain"
 
   if [[ ! -x "${maestral_bin}" ]]; then
     return 0
   fi
 
-  # Ensure maestral daemon is running (user service may not restart after hibernate)
-  echo "Checking Dropbox sync (maestral)..."
-  if ! timeout 10 "${maestral_bin}" status &>/dev/null; then
-    echo "  Maestral daemon not running. Starting it..."
-    timeout 15 "${maestral_bin}" start >/dev/null 2>&1 || true
-    sleep 2
+  echo "Starting Maestral for Dropbox sync..."
+
+  # Close the orchestrator lock fd so Maestral daemon doesn't inherit it.
+  # If Maestral inherits the lock, it blocks future orchestrator runs after hibernate.
+  local lock_fd="${_ORCH_LOCK_FD:-}"
+
+  # Stop any stale daemon from a previous run or pre-hibernate state
+  timeout 10 "${maestral_bin}" stop >/dev/null 2>&1 || true
+  sleep 1
+
+  # Start fresh
+  if [[ -n "${lock_fd}" ]]; then
+    eval "timeout 30 \"${maestral_bin}\" start ${lock_fd}>&- >/dev/null 2>&1 || true"
+  else
+    timeout 30 "${maestral_bin}" start >/dev/null 2>&1 || true
   fi
 
-  # Wait for maestral daemon to be reachable
+  # Wait for daemon to be reachable
   local maestral_ready=false
   for i in $(seq 1 12); do
     if timeout 10 "${maestral_bin}" status &>/dev/null; then
@@ -56,15 +64,28 @@ wait_for_dropbox_sync() {
     return 1
   fi
 
-  # Kick maestral to rescan local changes — avoids a race where status reports
-  # "Up to date" before it notices newly written files.
-  timeout 10 "${maestral_bin}" pause >/dev/null 2>&1 || true
-  sleep 1
-  timeout 10 "${maestral_bin}" resume >/dev/null 2>&1 || true
+  echo "Maestral daemon started."
+  return 0
+}
 
-  # Wait long enough for Maestral's filesystem scan to detect new/changed files.
-  # 2s was not enough — Maestral can report "Up to date" before it picks up changes.
-  sleep 5
+# Wait for Maestral to finish syncing (download or upload). Polls until
+# global status is "Up to date" / "Idle", then verifies no individual files
+# under brain/ are still in transit.
+# Usage: wait_for_dropbox_idle [home_dir]
+wait_for_dropbox_idle() {
+  local home_dir="${1:-${HOME:-/home/ubuntu}}"
+  local maestral_bin="${home_dir}/.local/bin/maestral"
+  local brain_dir="${home_dir}/brain"
+
+  if [[ ! -x "${maestral_bin}" ]]; then
+    return 0
+  fi
+
+  # Verify daemon is running
+  if ! timeout 10 "${maestral_bin}" status &>/dev/null; then
+    echo "WARNING: Maestral daemon not running. Cannot wait for sync."
+    return 1
+  fi
 
   echo "Waiting for Dropbox sync to complete..."
   local sync_wait=0
@@ -84,19 +105,17 @@ wait_for_dropbox_sync() {
     return 0
   fi
 
-  # Global status says "Up to date" but individual files may still be uploading.
-  # Check recently modified files under brain/ to catch the race condition where
-  # Maestral hasn't indexed a newly written file yet.
+  # Global status says "Up to date" but individual files may still be in transit.
+  # Check recently modified files under brain/ to catch the race.
   local file_timeout=60
   local file_wait=0
   local pending
   while [[ ${file_wait} -lt ${file_timeout} ]]; do
     pending=""
-    # Check files modified in the last 10 minutes
     while IFS= read -r f; do
       local fstatus
       fstatus=$(timeout 10 "${maestral_bin}" filestatus "${f}" 2>/dev/null || echo "")
-      if echo "${fstatus}" | grep -qi "uploading\|syncing"; then
+      if echo "${fstatus}" | grep -qi "uploading\|syncing\|downloading"; then
         pending="${pending} $(basename "${f}")"
       fi
     done < <(find "${brain_dir}" -type f -mmin -10 2>/dev/null)
@@ -105,13 +124,37 @@ wait_for_dropbox_sync() {
       echo "Dropbox sync complete."
       return 0
     fi
-    echo "  Waiting for file uploads:${pending}"
+    echo "  Waiting for file transfers:${pending}"
     sleep 5
     file_wait=$((file_wait + 5))
   done
 
-  echo "WARNING: Some files still uploading after ${file_timeout}s:${pending}"
+  echo "WARNING: Some files still syncing after ${file_timeout}s:${pending}"
   return 0
+}
+
+# Stop Maestral daemon cleanly. Called after post-run sync before hibernation.
+# Usage: stop_dropbox_sync [home_dir]
+stop_dropbox_sync() {
+  local home_dir="${1:-${HOME:-/home/ubuntu}}"
+  local maestral_bin="${home_dir}/.local/bin/maestral"
+
+  if [[ ! -x "${maestral_bin}" ]]; then
+    return 0
+  fi
+
+  echo "Stopping Maestral daemon..."
+  timeout 15 "${maestral_bin}" stop >/dev/null 2>&1 || true
+  echo "Maestral stopped."
+  return 0
+}
+
+# Legacy wrapper for backward compatibility (e.g. other scripts calling this).
+# Starts daemon if needed, waits for idle, but does NOT stop.
+# Usage: wait_for_dropbox_sync [home_dir]
+wait_for_dropbox_sync() {
+  local home_dir="${1:-${HOME:-/home/ubuntu}}"
+  start_dropbox_sync "${home_dir}" && wait_for_dropbox_idle "${home_dir}"
 }
 
 # Check if current hour is within active hours. Returns 0 if inside, 1 if outside.

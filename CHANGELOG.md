@@ -13,10 +13,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Changed
 
+- Start/stop Maestral per orchestrator run in scheduled mode instead of running continuously — eliminates all hibernation daemon recovery issues
+- Split `wait_for_dropbox_sync()` into `start_dropbox_sync()`, `wait_for_dropbox_idle()`, and `stop_dropbox_sync()` functions
+- Keep Maestral as a persistent systemd service in always-on mode for continuous sync
+- `set-schedule-mode.sh` now enables/disables the Maestral systemd service based on mode
 - Mark run counts as estimated (`~`) when using CloudTrail fallback instead of server logs
 
 ### Fixed
 
+- Fix Maestral daemon inheriting orchestrator lock fd, blocking all subsequent runs after hibernate
+- Close lock file descriptor before launching Maestral and MCP warm-up background processes
 - Fix Dropbox post-run sync reporting complete before files are actually uploaded — verify individual file status after global sync
 - Increase post-resume sleep from 2s to 5s to give Maestral time to detect new files
 

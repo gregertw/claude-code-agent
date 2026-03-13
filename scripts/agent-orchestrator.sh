@@ -30,7 +30,7 @@ NO_STOP="${1:-}"
 LOCK_FILE="${HOME_DIR}/.agent-orchestrator.lock"
 
 # --- Source shared functions --------------------------------------------------
-# Contains do_hibernate() and check_active_hours().
+# Contains do_hibernate(), check_active_hours(), start/stop/wait_for_dropbox_*.
 if [[ -f "${SCRIPTS_DIR}/agent-functions.sh" ]]; then
   source "${SCRIPTS_DIR}/agent-functions.sh"
 fi
@@ -44,6 +44,9 @@ if ! flock -n 9; then
   exit 0
 fi
 # Lock is held for the lifetime of this process (fd 9 stays open).
+# Export the lock fd number so child scripts (agent-functions.sh) can close it
+# before launching daemons that might outlive the orchestrator.
+export _ORCH_LOCK_FD=9
 
 # --- Setup -------------------------------------------------------------------
 mkdir -p "${ORCH_LOG_DIR}"
@@ -134,9 +137,13 @@ fi
 # Ensure INBOX and _processed dirs exist
 mkdir -p "${INBOX_DIR}/_processed" 2>/dev/null || true
 
-# --- 2b. Wait for Dropbox sync before running Claude -------------------------
-# Ensures all remote changes (tasks, instructions) are available locally.
-wait_for_dropbox_sync "${HOME_DIR}"
+# --- 2b. Dropbox sync before running Claude ----------------------------------
+# Scheduled mode: start Maestral fresh each run (avoids hibernation daemon issues).
+# Always-on mode: Maestral runs as a systemd service, just wait for idle.
+if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" ]]; then
+  start_dropbox_sync "${HOME_DIR}"
+fi
+wait_for_dropbox_idle "${HOME_DIR}"
 
 # --- 3. MCP warm-up ----------------------------------------------------------
 # Fire a quick Claude call that touches MCP servers to wake up connections.
@@ -170,6 +177,7 @@ if [[ ${#MCP_SERVERS[@]} -gt 0 ]]; then
     WARMUP_TOOLS+=("mcp__${server}")
   done
   (
+    exec 9>&-  # Close lock fd so background process can't hold it
     cd "${BRAIN_DIR}" && timeout --kill-after=5 30 claude -p \
       "Call one tool from each available MCP server to warm up connections. Be quick, just confirm each works." \
       --max-turns 5 \
@@ -318,8 +326,11 @@ fi
 echo ""
 echo "============================================================"
 
-# --- 9. Wait for Dropbox sync (upload results before stopping) --------------
-wait_for_dropbox_sync "${HOME_DIR}"
+# --- 9. Wait for Dropbox upload, then stop daemon (scheduled mode) -----------
+wait_for_dropbox_idle "${HOME_DIR}"
+if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" ]]; then
+  stop_dropbox_sync "${HOME_DIR}"
+fi
 
 # --- 10. Self-stop (scheduled mode) ----------------------------------------
 if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && "${NO_STOP}" != "--no-stop" ]]; then

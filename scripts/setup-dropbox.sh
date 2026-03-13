@@ -308,17 +308,19 @@ ok "Maestral status: ${SYNC_STATUS}"
 echo ""
 
 # =============================================================================
-# Step 6: Create systemd user service (optional — for auto-start on boot)
+# Step 6: Install systemd user service (used in always-on mode)
 # =============================================================================
+# The service file is always installed but only enabled in always-on mode.
+# In scheduled mode, the orchestrator starts/stops Maestral per-run instead.
+# The set-schedule-mode.sh script handles enabling/disabling this service.
 SYSTEMD_USER_DIR="${HOME}/.config/systemd/user"
 SERVICE_FILE="${SYSTEMD_USER_DIR}/maestral.service"
 
-if [[ ! -f "${SERVICE_FILE}" ]]; then
-  echo -e "${BOLD}Step 6: Auto-start service${NC}"
-  echo "────────────────────────────────────────"
+echo -e "${BOLD}Step 6: Systemd service${NC}"
+echo "────────────────────────────────────────"
 
-  mkdir -p "${SYSTEMD_USER_DIR}"
-  cat > "${SERVICE_FILE}" << EOF
+mkdir -p "${SYSTEMD_USER_DIR}"
+cat > "${SERVICE_FILE}" << EOF
 [Unit]
 Description=Maestral Dropbox Sync
 After=network-online.target
@@ -336,17 +338,18 @@ RestartSec=10
 WantedBy=default.target
 EOF
 
-  systemctl --user daemon-reload
-  systemctl --user enable maestral.service
-  ok "Maestral systemd service installed and enabled"
+systemctl --user daemon-reload
 
-  # Enable linger so user services start at boot without login
-  if command -v loginctl &>/dev/null; then
-    sudo loginctl enable-linger "$(whoami)" 2>/dev/null || true
-  fi
-
-  echo ""
+# Enable linger so user services start at boot without login
+if command -v loginctl &>/dev/null; then
+  sudo loginctl enable-linger "$(whoami)" 2>/dev/null || true
 fi
+
+# Don't enable by default — set-schedule-mode.sh manages this based on mode.
+# In scheduled mode: orchestrator starts/stops Maestral per-run.
+# In always-on mode: this service runs continuously.
+ok "Maestral service installed (enable via set-schedule-mode.sh)"
+echo ""
 
 # =============================================================================
 # Summary
