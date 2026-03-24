@@ -7,7 +7,7 @@
 #   ./agent-manager.sh --wakeup        Start a stopped instance, wait for SSH
 #   ./agent-manager.sh --sleep         Stop a running instance
 #   ./agent-manager.sh --always-on     Switch to always-on mode (remove scheduler)
-#   ./agent-manager.sh --scheduled [N] [H]  Switch to scheduled mode (every N min, hours H, default 60/6-22)
+#   ./agent-manager.sh --scheduled [N] [H] [WH]  Switch to scheduled mode (every N min, hours H, weekend WH)
 #   ./agent-manager.sh --run-agent     Trigger an agent run (fire and forget)
 #   ./agent-manager.sh --history [N]   Show wake/sleep/run timeline (last N days, default 7)
 #   ./agent-manager.sh --log [N]       Show Nth most recent orchestrator log (default: latest)
@@ -108,10 +108,140 @@ cmd_status() {
   # Schedule info (agent.conf sourced at top level)
   local mode="${SCHEDULE_MODE:-unknown}"
   if [[ "$mode" == "scheduled" ]]; then
-    echo -e "  Mode:       ${CYAN}scheduled${NC} (every ${SCHEDULE_INTERVAL:-60} min, hours ${SCHEDULE_HOURS:-6-22})"
+    local mode_detail="every ${SCHEDULE_INTERVAL:-60} min, hours ${SCHEDULE_HOURS:-6-22}"
+    if [[ -n "${SCHEDULE_WEEKEND_HOURS:-}" ]]; then
+      mode_detail+=", weekends ${SCHEDULE_WEEKEND_HOURS}"
+    fi
+    echo -e "  Mode:       ${CYAN}scheduled${NC} (${mode_detail})"
   else
     echo -e "  Mode:       ${CYAN}${mode}${NC}"
   fi
+
+  # Fetch AWS cost estimates in background while SSH runs
+  local cost_file cost_tmp_dir
+  cost_file=$(mktemp)
+  cost_tmp_dir=$(mktemp -d)
+  (
+    end_date=$(date -u +%Y-%m-%d)
+    mtd_start=$(date -u +%Y-%m-01)  # 1st of current month
+    # Cost Explorer: month-to-date by service (for actual + compute $/hour)
+    aws ce get-cost-and-usage \
+      --time-period "Start=${mtd_start},End=${end_date}" \
+      --granularity MONTHLY \
+      --metrics UnblendedCost \
+      --filter "{\"Dimensions\":{\"Key\":\"REGION\",\"Values\":[\"${REGION}\"]}}" \
+      --group-by Type=DIMENSION,Key=SERVICE \
+      --region us-east-1 \
+      --output json > "${cost_tmp_dir}/ce.json" 2>/dev/null || true
+    # CloudWatch: count hours the instance was running this month (each datapoint = 1 hour)
+    aws cloudwatch get-metric-statistics \
+      --namespace AWS/EC2 \
+      --metric-name CPUUtilization \
+      --dimensions "Name=InstanceId,Value=${INSTANCE_ID}" \
+      --start-time "${mtd_start}T00:00:00Z" \
+      --end-time "${end_date}T00:00:00Z" \
+      --period 3600 \
+      --statistics Average \
+      --region "${REGION}" \
+      --output json > "${cost_tmp_dir}/cw.json" 2>/dev/null || true
+    # Get average run duration from orchestrator logs on server
+    ssh -o ConnectTimeout=5 "${SSH_HOST}" "
+      for f in ~/logs/orchestrator-*.log; do
+        s=\$(head -1 \"\$f\" | sed 's/.*started at //' | sed 's/ ===//')
+        e=\$(stat -c %Y \"\$f\" 2>/dev/null)
+        s_epoch=\$(date -d \"\$s\" +%s 2>/dev/null)
+        if [ -n \"\$s_epoch\" ] && [ -n \"\$e\" ]; then
+          echo \$(( e - s_epoch ))
+        fi
+      done" > "${cost_tmp_dir}/run_secs.txt" 2>/dev/null || true
+    if [[ -s "${cost_tmp_dir}/ce.json" ]]; then
+      python3 - "${SCHEDULE_HOURS:-6-22}" "${SCHEDULE_INTERVAL:-60}" "${SCHEDULE_WEEKEND_HOURS:-}" \
+        "${cost_tmp_dir}/ce.json" "${cost_tmp_dir}/cw.json" "${cost_tmp_dir}/run_secs.txt" \
+        > "${cost_file}" 2>/dev/null << 'PYEOF'
+import json, sys, os
+from datetime import date
+
+schedule_hours = sys.argv[1]
+schedule_interval = int(sys.argv[2])
+weekend_hours = sys.argv[3]
+
+with open(sys.argv[4]) as f:
+    cost_data = json.load(f)
+cw_data = {}
+if os.path.getsize(sys.argv[5]) > 0:
+    with open(sys.argv[5]) as f:
+        cw_data = json.load(f)
+
+# Average run duration from orchestrator logs (seconds per wake)
+run_secs = []
+if os.path.exists(sys.argv[6]):
+    with open(sys.argv[6]) as f:
+        for line in f:
+            s = line.strip()
+            if s.isdigit() and 0 < int(s) < 18000:  # sanity: < 5h
+                run_secs.append(int(s))
+# Add ~2 min boot overhead per wake; use actual avg or fallback to 5 min total
+if run_secs:
+    avg_wake_min = (sum(run_secs) / len(run_secs)) / 60 + 2  # run + boot overhead
+else:
+    avg_wake_min = 5  # fallback
+
+# --- Month-to-date actual cost ---
+compute_total = 0.0
+fixed_total = 0.0
+for r in cost_data.get("ResultsByTime", []):
+    for g in r.get("Groups", []):
+        svc = g["Keys"][0]
+        amt = float(g["Metrics"]["UnblendedCost"]["Amount"])
+        if "Compute" in svc:
+            compute_total += amt
+        else:
+            fixed_total += amt
+
+mtd_total = compute_total + fixed_total
+if mtd_total < 0.001:
+    sys.exit(0)
+
+today = date.today()
+day_of_month = today.day
+import calendar
+days_in_month = calendar.monthrange(today.year, today.month)[1]
+
+# --- Schedule projection ---
+# Derive compute $/hour from actual spend and CloudWatch uptime hours
+running_hours = len(cw_data.get("Datapoints", []))
+if running_hours > 0 and compute_total > 0:
+    compute_per_hour = compute_total / running_hours
+    fixed_daily = fixed_total / day_of_month
+
+    # Calculate scheduled run-hours per week using actual wake duration
+    h_start, h_end = (int(x) for x in schedule_hours.split("-"))
+    weekday_active = h_end - h_start + 1
+
+    if schedule_interval < 60:
+        wakes_per_day = weekday_active * (60 / schedule_interval)
+    else:
+        wakes_per_day = weekday_active / (schedule_interval / 60)
+    weekday_run_hours = wakes_per_day * (avg_wake_min / 60)
+
+    if weekend_hours:
+        weekend_wakes = len(weekend_hours.split(","))
+        weekend_run_hours = weekend_wakes * (avg_wake_min / 60)
+    else:
+        weekend_run_hours = weekday_run_hours
+
+    weekly_run_hours = (weekday_run_hours * 5) + (weekend_run_hours * 2)
+    monthly_run_hours = weekly_run_hours * (30 / 7)
+    projected_monthly = (compute_per_hour * monthly_run_hours) + (fixed_daily * days_in_month)
+
+    print(f"${mtd_total:.1f} MTD (day {day_of_month}/{days_in_month}) \u00b7 ${projected_monthly:.0f}/mo projected (~{avg_wake_min:.0f} min/run)")
+else:
+    print(f"${mtd_total:.1f} MTD (day {day_of_month}/{days_in_month})")
+PYEOF
+    fi
+    rm -rf "${cost_tmp_dir}"
+  ) &
+  local cost_pid=$!
 
   # If running, try to get on-server status
   if [[ "${state}" == "running" ]]; then
@@ -123,6 +253,16 @@ cmd_status() {
     else
       echo -e "  ${DIM}(could not reach server via SSH)${NC}"
     fi
+  fi
+
+  # Show cost estimate (wait up to 5s for background query)
+  wait "${cost_pid}" 2>/dev/null || true
+  local cost_estimate
+  cost_estimate=$(cat "${cost_file}" 2>/dev/null)
+  rm -f "${cost_file}"
+  if [[ -n "${cost_estimate}" ]]; then
+    echo ""
+    echo -e "  Est. cost:  ${CYAN}${cost_estimate}${NC}"
   fi
 
   echo ""
@@ -253,21 +393,22 @@ cmd_always_on() {
 cmd_scheduled() {
   local interval="${1:-60}"
   local hours="${2:-${SCHEDULE_HOURS:-6-22}}"
+  local weekend_hours="${3:-${SCHEDULE_WEEKEND_HOURS:-}}"
   local state
   state=$(get_instance_state)
 
-  # Switch mode on the server (pass interval and hours)
+  # Switch mode on the server (pass interval, hours, and weekend hours)
   if [[ "${state}" == "running" ]]; then
     log "Setting server to scheduled mode..."
-    ssh -o ConnectTimeout=5 "${SSH_HOST}" "sudo ~/scripts/set-schedule-mode.sh scheduled ${interval} ${hours}" 2>/dev/null || true
+    ssh -o ConnectTimeout=5 "${SSH_HOST}" "sudo ~/scripts/set-schedule-mode.sh scheduled ${interval} ${hours} ${weekend_hours}" 2>/dev/null || true
   else
     warn "Instance is ${state}. Mode will be set on next boot."
   fi
 
-  # Deploy EventBridge scheduler (with hours)
-  log "Deploying EventBridge scheduler (every ${interval} min, hours ${hours})..."
+  # Deploy EventBridge scheduler (with hours and weekend hours)
+  log "Deploying EventBridge scheduler..."
   if [[ -f "${SCRIPT_DIR}/deploy-scheduler.sh" ]]; then
-    bash "${SCRIPT_DIR}/deploy-scheduler.sh" "${INSTANCE_ID}" "${interval}" "${REGION}" "${hours}"
+    bash "${SCRIPT_DIR}/deploy-scheduler.sh" "${INSTANCE_ID}" "${interval}" "${REGION}" "${hours}" "${weekend_hours}"
   else
     err "deploy-scheduler.sh not found."
     return 1
@@ -280,6 +421,13 @@ cmd_scheduled() {
     if grep -q '^SCHEDULE_HOURS=' "${SCRIPT_DIR}/agent.conf"; then
       sed -i.bak "s/^SCHEDULE_HOURS=.*/SCHEDULE_HOURS=\"${hours}\"/" "${SCRIPT_DIR}/agent.conf"
     fi
+    if [[ -n "${weekend_hours}" ]]; then
+      if grep -q '^SCHEDULE_WEEKEND_HOURS=' "${SCRIPT_DIR}/agent.conf"; then
+        sed -i.bak "s/^SCHEDULE_WEEKEND_HOURS=.*/SCHEDULE_WEEKEND_HOURS=\"${weekend_hours}\"/" "${SCRIPT_DIR}/agent.conf"
+      else
+        echo "SCHEDULE_WEEKEND_HOURS=\"${weekend_hours}\"" >> "${SCRIPT_DIR}/agent.conf"
+      fi
+    fi
     rm -f "${SCRIPT_DIR}/agent.conf.bak"
     log "Updated agent.conf"
   fi
@@ -288,9 +436,15 @@ cmd_scheduled() {
   log "Mode switched to scheduled."
   echo ""
   echo -e "  ${BOLD}Both systems updated:${NC}"
-  echo -e "  ${CYAN}EventBridge:${NC} wakes instance every ${interval} min during hours ${hours}"
-  echo -e "  ${CYAN}Server cron:${NC} runs orchestrator every ${interval} min during hours ${hours}"
-  echo -e "  ${CYAN}Active guard:${NC} self-stops immediately if woken outside hours ${hours}"
+  if [[ -n "${weekend_hours}" ]]; then
+    echo -e "  ${CYAN}EventBridge (weekdays):${NC} wakes instance every ${interval} min during hours ${hours}"
+    echo -e "  ${CYAN}EventBridge (weekends):${NC} wakes instance at hours ${weekend_hours}"
+    echo -e "  ${CYAN}Server cron:${NC} weekdays every ${interval} min (${hours}), weekends at ${weekend_hours}"
+  else
+    echo -e "  ${CYAN}EventBridge:${NC} wakes instance every ${interval} min during hours ${hours}"
+    echo -e "  ${CYAN}Server cron:${NC} runs orchestrator every ${interval} min during hours ${hours}"
+  fi
+  echo -e "  ${CYAN}Active guard:${NC} self-stops immediately if woken outside active hours"
   echo ""
 }
 
@@ -806,7 +960,7 @@ case "${1:---status}" in
   --wakeup|wakeup)     cmd_wakeup ;;
   --sleep|sleep)       cmd_sleep ;;
   --always-on|always-on)     cmd_always_on ;;
-  --scheduled|scheduled)     cmd_scheduled "${2:-60}" "${3:-}" ;;
+  --scheduled|scheduled)     cmd_scheduled "${2:-60}" "${3:-}" "${4:-}" ;;
   --run-agent|run-agent)     cmd_run_agent ;;
   --history|history)         cmd_history "${2:-7}" ;;
   --log|log)                 cmd_log "${2:-1}" ;;

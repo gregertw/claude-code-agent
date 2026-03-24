@@ -47,6 +47,11 @@ SCHEDULE_INTERVAL=60
 # Active hours for cron (cron hour range syntax, e.g. "6-22" or "*" for all)
 SCHEDULE_HOURS="6-22"
 
+# Weekend hours — comma-separated hours to run on Sat/Sun (e.g. "8,17")
+# When set, weekdays use SCHEDULE_HOURS + SCHEDULE_INTERVAL, weekends fire
+# only at the listed hours. Leave empty to use the same schedule every day.
+#SCHEDULE_WEEKEND_HOURS=""
+
 # --- AWS ---------------------------------------------------------------------
 # AWS region for the EC2 instance and EventBridge Scheduler
 # Pick the one from AWS regions that is closest to you

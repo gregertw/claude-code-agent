@@ -4,7 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## 2026-03-24
+
+### Added
+
+- Add `SCHEDULE_WEEKEND_HOURS` config for separate weekend schedules (e.g. `"8,17"` for 8am and 5pm only)
+- Generate separate weekday/weekend cron lines and EventBridge schedules when weekend hours are configured
+- Show cost estimate in `--status` with month-to-date actual (Cost Explorer) and projected monthly cost (based on current schedule)
+- Derive projected cost from actual per-hour compute rate (CloudWatch) and measured run duration (orchestrator logs)
 
 ### Changed
 

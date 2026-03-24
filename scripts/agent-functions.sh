@@ -158,10 +158,24 @@ wait_for_dropbox_sync() {
 }
 
 # Check if current hour is within active hours. Returns 0 if inside, 1 if outside.
+# Usage: check_active_hours <weekday-hours> [weekend-hours]
+# When weekend_hours is set and today is Sat/Sun, checks against the comma-separated
+# hour list (e.g. "8,17") instead of the weekday range.
 check_active_hours() {
   local hours="${1:-6-22}"
+  local weekend_hours="${2:-}"
   local current_hour
   current_hour=$(date +%-H)
+  local day_of_week
+  day_of_week=$(date +%u)  # 1=Mon .. 7=Sun
+
+  # Weekend: check comma-separated hour list
+  if [[ -n "${weekend_hours}" && (${day_of_week} -eq 6 || ${day_of_week} -eq 7) ]]; then
+    echo ",${weekend_hours}," | grep -q ",${current_hour},"
+    return $?
+  fi
+
+  # Weekday (or no weekend override): check range
   local hour_start="${hours%%-*}"
   local hour_end="${hours##*-}"
   if [[ ${current_hour} -lt ${hour_start} || ${current_hour} -gt ${hour_end} ]]; then

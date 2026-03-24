@@ -74,12 +74,12 @@ source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
 # This prevents the server from staying awake if woken by a stale schedule,
 # manual start, or hibernation resume outside active hours.
 if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && "${NO_STOP}" != "--no-stop" ]]; then
-  if ! check_active_hours "${SCHEDULE_HOURS:-6-22}"; then
-    echo "Outside active hours (${SCHEDULE_HOURS:-6-22}, current: $(date +%-H)). Skipping run."
+  if ! check_active_hours "${SCHEDULE_HOURS:-6-22}" "${SCHEDULE_WEEKEND_HOURS:-}"; then
+    echo "Outside active hours (${SCHEDULE_HOURS:-6-22}, weekend: ${SCHEDULE_WEEKEND_HOURS:-same}, current: $(date +%-H)). Skipping run."
     do_hibernate "Outside active hours"
     exit 0
   fi
-  echo "Active hours check: OK (${SCHEDULE_HOURS:-6-22}, current: $(date +%-H))"
+  echo "Active hours check: OK (${SCHEDULE_HOURS:-6-22}, weekend: ${SCHEDULE_WEEKEND_HOURS:-same}, current: $(date +%-H))"
 fi
 
 # Derive paths from config

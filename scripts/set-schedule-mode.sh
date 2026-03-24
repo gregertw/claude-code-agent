@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # =============================================================================
 # Toggle between always-on and scheduled mode.
-# Usage: set-schedule-mode.sh <always-on|scheduled> [interval] [hours]
+# Usage: set-schedule-mode.sh <always-on|scheduled> [interval] [hours] [weekend-hours]
 # =============================================================================
 
 set -euo pipefail
@@ -36,18 +36,39 @@ if [[ -n "$HOURS" ]]; then
   fi
 fi
 
+WEEKEND_HOURS="${4:-}"
+if [[ -n "$WEEKEND_HOURS" ]]; then
+  if grep -q '^SCHEDULE_WEEKEND_HOURS=' "${HOME_DIR}/.agent-schedule"; then
+    sed -i "s/^SCHEDULE_WEEKEND_HOURS=.*/SCHEDULE_WEEKEND_HOURS=\"${WEEKEND_HOURS}\"/" "${HOME_DIR}/.agent-schedule"
+  else
+    echo "SCHEDULE_WEEKEND_HOURS=\"${WEEKEND_HOURS}\"" >> "${HOME_DIR}/.agent-schedule"
+  fi
+fi
+
 # Re-source for cron update
 source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
 CRON_INTERVAL="${SCHEDULE_INTERVAL:-60}"
 CRON_HOURS="${SCHEDULE_HOURS:-6-22}"
+CRON_WEEKEND_HOURS="${SCHEDULE_WEEKEND_HOURS:-}"
 CRON_USER="${SUDO_USER:-$(whoami)}"
+CRON_CMD="${HOME_DIR}/scripts/agent-orchestrator.sh >> ${HOME_DIR}/logs/cron-orchestrator.log 2>&1"
 
 # Update orchestrator cron
-sudo tee /etc/cron.d/agent-orchestrator > /dev/null << CRON
-# Run agent orchestrator every ${CRON_INTERVAL} minutes during active hours
-# flock in the orchestrator prevents concurrent runs
-*/${CRON_INTERVAL} ${CRON_HOURS} * * * ${CRON_USER} ${HOME_DIR}/scripts/agent-orchestrator.sh >> ${HOME_DIR}/logs/cron-orchestrator.log 2>&1
+if [[ -n "${CRON_WEEKEND_HOURS}" ]]; then
+  # Separate weekday and weekend schedules
+  sudo tee /etc/cron.d/agent-orchestrator > /dev/null << CRON
+# Weekdays: every ${CRON_INTERVAL} min during hours ${CRON_HOURS}
+*/${CRON_INTERVAL} ${CRON_HOURS} * * 1-5 ${CRON_USER} ${CRON_CMD}
+# Weekends: specific hours ${CRON_WEEKEND_HOURS}
+0 ${CRON_WEEKEND_HOURS} * * 0,6 ${CRON_USER} ${CRON_CMD}
 CRON
+else
+  sudo tee /etc/cron.d/agent-orchestrator > /dev/null << CRON
+# Run agent orchestrator every ${CRON_INTERVAL} min during active hours
+# flock in the orchestrator prevents concurrent runs
+*/${CRON_INTERVAL} ${CRON_HOURS} * * * ${CRON_USER} ${CRON_CMD}
+CRON
+fi
 sudo chmod 644 /etc/cron.d/agent-orchestrator
 
 # Enable/disable systemd services and sleep hook, then report
@@ -73,7 +94,12 @@ if [[ "$MODE" == "scheduled" ]]; then
   echo "Switched to SCHEDULED mode."
   echo ""
   echo "  Server-side (updated now):"
-  echo "    Cron: every ${CRON_INTERVAL} min during hours ${CRON_HOURS}"
+  if [[ -n "${CRON_WEEKEND_HOURS}" ]]; then
+    echo "    Cron (weekdays): every ${CRON_INTERVAL} min during hours ${CRON_HOURS}"
+    echo "    Cron (weekends): at hours ${CRON_WEEKEND_HOURS}"
+  else
+    echo "    Cron: every ${CRON_INTERVAL} min during hours ${CRON_HOURS}"
+  fi
   echo "    Boot runner: enabled"
   echo "    Resume hook: enabled (system-sleep)"
   echo "    Maestral: per-run (orchestrator starts/stops)"

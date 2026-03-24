@@ -285,6 +285,7 @@ cat > "${HOME_DIR}/.agent-schedule" << EOF
 SCHEDULE_MODE="${SCHEDULE_MODE}"
 SCHEDULE_INTERVAL="${SCHEDULE_INTERVAL}"
 SCHEDULE_HOURS="${SCHEDULE_HOURS:-6-22}"
+SCHEDULE_WEEKEND_HOURS="${SCHEDULE_WEEKEND_HOURS:-}"
 SCHEDULE_TZ="${SERVER_TZ}"
 EOF
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/.agent-schedule"
@@ -527,13 +528,25 @@ fi
 log "Installing orchestrator cron job..."
 CRON_INTERVAL="${SCHEDULE_INTERVAL:-60}"
 CRON_HOURS="${SCHEDULE_HOURS:-6-22}"
-cat > /etc/cron.d/agent-orchestrator << CRON
+CRON_WEEKEND_HOURS="${SCHEDULE_WEEKEND_HOURS:-}"
+CRON_CMD="${HOME_DIR}/scripts/agent-orchestrator.sh >> ${HOME_DIR}/logs/cron-orchestrator.log 2>&1"
+if [[ -n "${CRON_WEEKEND_HOURS}" ]]; then
+  cat > /etc/cron.d/agent-orchestrator << CRON
+# Weekdays: every ${CRON_INTERVAL} min during hours ${CRON_HOURS}
+*/${CRON_INTERVAL} ${CRON_HOURS} * * 1-5 ${UBUNTU_USER} ${CRON_CMD}
+# Weekends: specific hours ${CRON_WEEKEND_HOURS}
+0 ${CRON_WEEKEND_HOURS} * * 0,6 ${UBUNTU_USER} ${CRON_CMD}
+CRON
+  log "Orchestrator cron installed (weekdays every ${CRON_INTERVAL} min ${CRON_HOURS}, weekends at ${CRON_WEEKEND_HOURS})."
+else
+  cat > /etc/cron.d/agent-orchestrator << CRON
 # Run agent orchestrator every ${CRON_INTERVAL} minutes during active hours
 # flock in the orchestrator prevents concurrent runs
-*/${CRON_INTERVAL} ${CRON_HOURS} * * * ${UBUNTU_USER} ${HOME_DIR}/scripts/agent-orchestrator.sh >> ${HOME_DIR}/logs/cron-orchestrator.log 2>&1
+*/${CRON_INTERVAL} ${CRON_HOURS} * * * ${UBUNTU_USER} ${CRON_CMD}
 CRON
+  log "Orchestrator cron installed (every ${CRON_INTERVAL} min)."
+fi
 chmod 644 /etc/cron.d/agent-orchestrator
-log "Orchestrator cron installed (every ${CRON_INTERVAL} min)."
 
 # --- 15. Schedule Mode Toggle Script ----------------------------------------
 log "Installing schedule mode toggle..."
