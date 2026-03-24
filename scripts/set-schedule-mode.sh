@@ -50,10 +50,21 @@ sudo tee /etc/cron.d/agent-orchestrator > /dev/null << CRON
 CRON
 sudo chmod 644 /etc/cron.d/agent-orchestrator
 
-# Enable/disable systemd services and report
+# Enable/disable systemd services and sleep hook, then report
+SLEEP_HOOK="/usr/lib/systemd/system-sleep/agent-resume"
 if [[ "$MODE" == "scheduled" ]]; then
   systemctl enable agent-boot-runner.service
-  systemctl enable agent-resume-runner.service
+  # Resume hook: install system-sleep hook (reliable on every hibernate resume).
+  # The legacy systemd service is unreliable — oneshot services with
+  # WantedBy=hibernate.target may not re-trigger on consecutive resumes.
+  cp "${HOME_DIR}/scripts/agent-resume-hook.sh" "${SLEEP_HOOK}"
+  chmod 755 "${SLEEP_HOOK}"
+  # Remove legacy systemd service if present
+  if systemctl is-enabled agent-resume-runner.service &>/dev/null 2>&1; then
+    systemctl disable agent-resume-runner.service 2>/dev/null || true
+  fi
+  rm -f /etc/systemd/system/agent-resume-runner.service
+  systemctl daemon-reload
   # Scheduled mode: orchestrator manages Maestral lifecycle per-run.
   # Disable the persistent service to avoid stale daemon after hibernation.
   if systemctl --user is-enabled maestral.service &>/dev/null 2>&1; then
@@ -64,7 +75,7 @@ if [[ "$MODE" == "scheduled" ]]; then
   echo "  Server-side (updated now):"
   echo "    Cron: every ${CRON_INTERVAL} min during hours ${CRON_HOURS}"
   echo "    Boot runner: enabled"
-  echo "    Resume runner: enabled"
+  echo "    Resume hook: enabled (system-sleep)"
   echo "    Maestral: per-run (orchestrator starts/stops)"
   echo "    Active guard: self-stops if woken outside hours ${CRON_HOURS}"
   echo "    Self-stop: enabled after each run"
@@ -74,14 +85,21 @@ if [[ "$MODE" == "scheduled" ]]; then
   echo "    To prevent self-stop during SSH: touch ~/agents/.keep-running"
 else
   systemctl disable agent-boot-runner.service
-  systemctl disable agent-resume-runner.service
+  # Remove resume hook in always-on mode (cron handles everything)
+  rm -f "${SLEEP_HOOK}"
+  # Also remove legacy systemd service if present
+  if systemctl is-enabled agent-resume-runner.service &>/dev/null 2>&1; then
+    systemctl disable agent-resume-runner.service 2>/dev/null || true
+  fi
+  rm -f /etc/systemd/system/agent-resume-runner.service
+  systemctl daemon-reload
   # Always-on mode: enable persistent Maestral service for continuous sync.
   if systemctl --user cat maestral.service &>/dev/null 2>&1; then
     su - "${CRON_USER}" -c "systemctl --user enable maestral.service 2>/dev/null; systemctl --user start maestral.service 2>/dev/null" || true
   fi
   echo "Switched to ALWAYS-ON mode (every ${CRON_INTERVAL} min)."
   echo "  Boot runner: disabled"
-  echo "  Resume runner: disabled"
+  echo "  Resume hook: disabled"
   echo "  Maestral: continuous (systemd service)"
   echo "  Cron: every ${CRON_INTERVAL} min"
   echo "  Self-stop: disabled"

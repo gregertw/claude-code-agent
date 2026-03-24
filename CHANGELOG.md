@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Changed
+
+- Replace systemd oneshot resume service with system-sleep hook for reliable hibernate resume on every cycle
+- Clean up legacy agent-resume-runner.service on deploy and mode switch
+
 ## 2026-03-13
 
 ### Added

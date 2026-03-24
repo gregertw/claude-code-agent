@@ -432,7 +432,7 @@ RemainAfterExit=no
 WantedBy=multi-user.target
 EOF
 
-# Create systemd service to trigger orchestrator on resume from hibernation.
+# Install resume-check script for triggering orchestrator on wake from hibernation.
 # Hibernation resumes do NOT re-run boot services (multi-user.target is already
 # active) and cron does NOT catch up on missed jobs, so without this the first
 # run after wake would be up to 60 minutes later.
@@ -447,36 +447,34 @@ fi
 chmod +x "${HOME_DIR}/scripts/agent-resume-check.sh"
 chown "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/scripts/agent-resume-check.sh"
 
-cat > /etc/systemd/system/agent-resume-runner.service << EOF
-[Unit]
-Description=Agent Orchestrator — runs tasks on resume from hibernation
-After=hibernate.target suspend.target
+# Install system-sleep hook for hibernate resume (from template file).
+# A systemd oneshot service with WantedBy=hibernate.target is unreliable:
+# it may not re-trigger on every resume within the same boot session.
+# The system-sleep hook runs reliably on every hibernate/resume cycle.
+if [[ -f "${SERVER_SCRIPTS}/agent-resume-hook.sh" ]]; then
+  cp "${SERVER_SCRIPTS}/agent-resume-hook.sh" /usr/lib/systemd/system-sleep/agent-resume
+else
+  warn "agent-resume-hook.sh not found in ${SERVER_SCRIPTS}."
+fi
+chmod 755 /usr/lib/systemd/system-sleep/agent-resume
 
-[Service]
-Type=oneshot
-User=${UBUNTU_USER}
-Group=${UBUNTU_USER}
-ExecStartPre=/bin/sleep 5
-ExecStart=${HOME_DIR}/scripts/agent-resume-check.sh
-Environment=HOME=${HOME_DIR}
-TimeoutStartSec=900
-RemainAfterExit=no
-
-[Install]
-WantedBy=hibernate.target suspend.target
-EOF
+# Remove legacy systemd service if present (replaced by system-sleep hook above)
+if [[ -f /etc/systemd/system/agent-resume-runner.service ]]; then
+  systemctl disable agent-resume-runner.service 2>/dev/null || true
+  rm -f /etc/systemd/system/agent-resume-runner.service
+fi
 
 systemctl daemon-reload
 if [[ "${SCHEDULE_MODE}" == "scheduled" ]]; then
   systemctl enable agent-boot-runner.service
-  systemctl enable agent-resume-runner.service
   log "Boot runner ENABLED (scheduled mode)."
-  log "Resume runner ENABLED (triggers orchestrator on wake from hibernation)."
+  log "Resume hook ENABLED (system-sleep, triggers orchestrator on wake from hibernation)."
 else
   systemctl disable agent-boot-runner.service
-  systemctl disable agent-resume-runner.service
+  # Remove resume hook in always-on mode (cron handles everything)
+  rm -f /usr/lib/systemd/system-sleep/agent-resume
   log "Boot runner DISABLED (always-on mode)."
-  log "Resume runner DISABLED (always-on mode)."
+  log "Resume hook DISABLED (always-on mode)."
 fi
 
 # Create systemd service for agent code upgrade (runs before orchestrator)
