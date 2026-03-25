@@ -14,11 +14,19 @@ claude-code-agent/
 ├── agent.conf.example          # Configuration template (Option B)
 │
 ├── templates/                  # Brain directory templates
-│   ├── CLAUDE.md               #   Workspace instructions for Claude Code
-│   ├── tasks.md                #   Task type definitions and execution rules
-│   ├── default-tasks.md        #   Recurring tasks (email, calendar, inbox, etc.)
-│   ├── personal.md             #   Personal context (filled in during setup)
-│   └── style.md                #   Writing style rules (filled in during setup)
+│   ├── CLAUDE.md               #   Workspace instructions (system — updated on upgrade)
+│   ├── ACTIONS.md              #   Owner's dashboard (user — preserved on upgrade)
+│   ├── tasks.md                #   Task execution rules (system — updated on upgrade)
+│   ├── default-tasks.md        #   Recurring tasks (system — updated on upgrade)
+│   ├── personal-tasks.md       #   User's custom recurring tasks (user — preserved)
+│   ├── personal.md             #   Personal context (user — preserved on upgrade)
+│   ├── style.md                #   Writing style rules (user — preserved on upgrade)
+│   └── obsidian/               #   Obsidian document templates
+│       ├── ai instruction.md   #     Template for new AI instruction files
+│       ├── daily note.md       #     Template for daily notes
+│       ├── email.md            #     Template for email drafts
+│       ├── scratchpad.md       #     Template for scratchpad notes
+│       └── task.md             #     Template for task files
 │
 ├── docs/                       # Setup and customization guides
 │   ├── local-setup.md          #   Option A step-by-step
@@ -71,17 +79,22 @@ feature opens that directory as a workspace. No cloud infrastructure is needed.
 ```
 ~/brain/                          (your chosen location)
 ├── CLAUDE.md                     Workspace instructions (read by Claude on session start)
+├── ACTIONS.md                    Owner's dashboard — action items, updated every run
 ├── ai/instructions/
-│   ├── tasks.md                  Task definitions and execution rules
-│   ├── default-tasks.md          Recurring tasks
+│   ├── tasks.md                  Task execution rules
+│   ├── default-tasks.md          Built-in recurring tasks
+│   ├── personal-tasks.md         Your custom recurring tasks (add your own here)
 │   ├── personal.md               Your personal context
 │   └── style.md                  Your writing style
 ├── ai/scratchpad/                Agent scratch space
 ├── INBOX/                        Drop .txt/.md files here for one-off tasks
 │   └── _processed/               Completed inbox tasks (moved here with date prefix)
+├── templates/                    Obsidian document templates
 └── output/
     ├── tasks/                    Task results
     ├── logs/                     Run logs
+    ├── emails/                   Email drafts, daily digest, follow-up tracker
+    ├── news/                     Daily news reports from newsletters
     ├── research/                 Meeting prep, background research
     ├── improvements/             Self-review proposals
     └── .agent-heartbeat          Last-run timestamp
@@ -141,17 +154,22 @@ Local machine                              AWS
 /home/ubuntu/
 ├── brain/                                Agent working directory
 │   ├── CLAUDE.md
+│   ├── ACTIONS.md                        Owner's dashboard
 │   ├── ai/instructions/
 │   │   ├── tasks.md
 │   │   ├── default-tasks.md
+│   │   ├── personal-tasks.md             User's custom recurring tasks
 │   │   ├── personal.md
 │   │   └── style.md
 │   ├── ai/scratchpad/
 │   ├── INBOX/
 │   │   └── _processed/
+│   ├── templates/                        Obsidian document templates
 │   └── output/
 │       ├── tasks/
 │       ├── logs/                         Symlinks to ~/logs/agent-run-*.md
+│       ├── emails/                       Email drafts, digest, follow-ups
+│       ├── news/                         Daily news reports
 │       ├── research/
 │       ├── improvements/
 │       └── .agent-heartbeat
@@ -208,13 +226,16 @@ EventBridge wakes instance (scheduled mode)
   claude -p "<master prompt>" --max-turns 50 --output-format text
          │
          ├─ Read ai/instructions/*.md
+         ├─ Process ACTIONS.md (resolve checked items, read inline instructions)
          ├─ Execute default-tasks.md (email, calendar, inbox, tasks, etc.)
+         ├─ Execute personal-tasks.md (user's custom recurring tasks)
          ├─ Scan INBOX/ for one-off tasks
          ├─ Call work_on_task() for ActingWeb tasks
          ├─ Write results to output/tasks/
          │
          ▼
   Post-run
+         ├─ Update ACTIONS.md (new items, refreshed dates, run log link)
          ├─ Capture output to ~/logs/agent-run-<timestamp>.md
          ├─ Write heartbeat to ~/brain/output/.agent-heartbeat
          └─ (If scheduled mode) sudo shutdown -h now
@@ -256,31 +277,46 @@ Switch with `./agent-manager.sh --always-on` or `./agent-manager.sh --scheduled 
 
 ## Task Architecture
 
-Both options process the same three task sources, in order:
+Both options process the same four task sources, in order:
 
 ### 1. Default tasks (`ai/instructions/default-tasks.md`)
 
-Run every cycle. Includes email triage, calendar preview, inbox scan, ActingWeb
-task check, memory hygiene (weekly), self-review (daily), and heartbeat check.
-Tasks that require an unconnected MCP server are skipped automatically.
+Run every cycle. Includes email triage (with newsletter digest, follow-up tracking,
+unsubscribe suggestions), calendar preview (with meeting prep and email cross-reference),
+inbox scan, ActingWeb task check, memory hygiene (weekly), self-review (daily),
+heartbeat check, and daily news report. Tasks that require an unconnected MCP
+server are skipped automatically.
 
-### 2. Inbox tasks (`INBOX/` folder)
+### 2. Personal tasks (`ai/instructions/personal-tasks.md`)
+
+User-defined recurring tasks. This file is never overwritten by upgrades — add
+your own custom recurring tasks here following the same format as default-tasks.md.
+
+### 3. Inbox tasks (`INBOX/` folder)
 
 Drop a `.txt` or `.md` file in `INBOX/`. The agent reads it as a task prompt,
 executes it, moves the file to `INBOX/_processed/<date>-<filename>`, and writes
 the result to `output/tasks/<filename>.result.md`.
 
-### 3. ActingWeb tasks
+### 4. ActingWeb tasks
 
 Created via the Context Builder web UI (`https://ai.actingweb.io/{actor_id}/app/builder`)
 from any device. The agent retrieves tasks via `work_on_task()`, executes them
 with gathered context, writes results, and marks them done.
 
+### ACTIONS.md — the owner's dashboard
+
+Every run, the agent updates `ACTIONS.md` with action items: upcoming meetings,
+email drafts needing approval, calendar conflicts, news reports, stale drafts,
+follow-up nudges, and self-review proposals. The owner marks items done (checkbox
+or strikethrough) and the agent clears them on the next run. Inline annotations
+on items are treated as instructions.
+
 ### Execution constraints
 
-- Max 5 minutes per task
+- Max 10 minutes per task (most complete in under 2 minutes)
 - Fail gracefully and continue to the next task
-- Never send emails or messages without review
+- Never send emails or messages without explicit instruction
 - Never delete files (move to `_processed/` or `_archive/`)
 - Log everything
 

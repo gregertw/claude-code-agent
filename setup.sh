@@ -699,23 +699,65 @@ if [[ -f "${SERVER_SCRIPTS}/agent-setup.sh" ]]; then
   log "agent-setup.sh copied to home directory."
 fi
 
+# Create output subdirectories
+mkdir -p "${BRAIN_DIR}/ai/scratchpad"
+mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/emails"
+mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/news"
+chown -R "${UBUNTU_USER}:${UBUNTU_USER}" "${BRAIN_DIR}/ai/scratchpad"
+chown -R "${UBUNTU_USER}:${UBUNTU_USER}" "${BRAIN_DIR}/${OUTPUT_FOLDER}/emails"
+chown -R "${UBUNTU_USER}:${UBUNTU_USER}" "${BRAIN_DIR}/${OUTPUT_FOLDER}/news"
+
 # Install templates directly into brain directory
+# System files (CLAUDE.md, tasks.md, default-tasks.md) are always installed/overwritten.
+# User files (personal.md, style.md, personal-tasks.md, ACTIONS.md) are only
+# installed if they don't exist — never overwritten.
 TEMPLATES_DIR="${SCRIPT_DIR}/templates"
 if [[ -d "${TEMPLATES_DIR}" ]]; then
   log "Installing templates into brain directory..."
   for f in "${TEMPLATES_DIR}"/*.md; do
     BASENAME=$(basename "$f")
-    if [[ "$BASENAME" == "CLAUDE.md" ]]; then
-      TARGET="${BRAIN_DIR}/CLAUDE.md"
+    if [[ "$BASENAME" == "CLAUDE.md" || "$BASENAME" == "ACTIONS.md" ]]; then
+      TARGET="${BRAIN_DIR}/${BASENAME}"
     else
       TARGET="${BRAIN_DIR}/ai/instructions/${BASENAME}"
     fi
-    if [[ ! -f "${TARGET}" ]]; then
-      cp "$f" "${TARGET}"
-      chown "${UBUNTU_USER}:${UBUNTU_USER}" "${TARGET}"
-      log "  Installed: ${TARGET}"
-    fi
+
+    # Determine if this is a system file (safe to overwrite) or user file (preserve)
+    case "$BASENAME" in
+      CLAUDE.md|tasks.md|default-tasks.md)
+        # System file — always install
+        cp "$f" "${TARGET}"
+        chown "${UBUNTU_USER}:${UBUNTU_USER}" "${TARGET}"
+        log "  Installed: ${TARGET}"
+        ;;
+      *)
+        # User file — only install if missing
+        if [[ ! -f "${TARGET}" ]]; then
+          cp "$f" "${TARGET}"
+          chown "${UBUNTU_USER}:${UBUNTU_USER}" "${TARGET}"
+          log "  Installed: ${TARGET}"
+        else
+          log "  Preserved: ${TARGET}"
+        fi
+        ;;
+    esac
   done
+
+  # Install Obsidian document templates (never overwrite)
+  if [[ -d "${TEMPLATES_DIR}/obsidian" ]]; then
+    mkdir -p "${BRAIN_DIR}/templates"
+    for f in "${TEMPLATES_DIR}/obsidian/"*.md; do
+      [[ ! -f "$f" ]] && continue
+      BASENAME=$(basename "$f")
+      TARGET="${BRAIN_DIR}/templates/${BASENAME}"
+      if [[ ! -f "${TARGET}" ]]; then
+        cp "$f" "${TARGET}"
+        chown "${UBUNTU_USER}:${UBUNTU_USER}" "${TARGET}"
+        log "  Installed: ${TARGET}"
+      fi
+    done
+    chown -R "${UBUNTU_USER}:${UBUNTU_USER}" "${BRAIN_DIR}/templates"
+  fi
 fi
 
 # Copy template installer script (useful for re-installing)
@@ -776,6 +818,10 @@ fi
 if [[ -d "${REPO_DIR}/templates" ]]; then
   mkdir -p "${HOME_DIR}/.agent-templates"
   cp "${REPO_DIR}/templates/"*.md "${HOME_DIR}/.agent-templates/" 2>/dev/null || true
+  if [[ -d "${REPO_DIR}/templates/obsidian" ]]; then
+    mkdir -p "${HOME_DIR}/.agent-templates/obsidian"
+    cp "${REPO_DIR}/templates/obsidian/"*.md "${HOME_DIR}/.agent-templates/obsidian/" 2>/dev/null || true
+  fi
   chown -R "${UBUNTU_USER}:${UBUNTU_USER}" "${HOME_DIR}/.agent-templates"
 fi
 
@@ -814,8 +860,21 @@ echo "   (Handles brain directory, MCP servers, and verification)"
 echo ""
 STEP=$((STEP + 1))
 
+echo "${STEP}. PERSONALIZE YOUR AGENT"
+echo "   Edit ${BRAIN_DIR}/ai/instructions/personal.md — fill in your identity and preferences"
+echo "   Edit ${BRAIN_DIR}/ai/instructions/style.md — define your writing voice"
+echo "   Add custom recurring tasks in ${BRAIN_DIR}/ai/instructions/personal-tasks.md"
+echo ""
+STEP=$((STEP + 1))
+
 echo "${STEP}. TEST THE AGENT"
 echo "   agent run"
+echo ""
+echo "   YOUR WORKSPACE:"
+echo "   - ACTIONS.md    — your dashboard; the agent updates it, you act on items"
+echo "   - INBOX/        — drop .md files here to give the agent tasks"
+echo "   - ${OUTPUT_FOLDER}/emails/  — email drafts with status: frontmatter (approve to send)"
+echo "   - ${OUTPUT_FOLDER}/news/    — daily news reports from your newsletters"
 echo ""
 STEP=$((STEP + 1))
 

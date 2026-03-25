@@ -80,7 +80,11 @@ After personalization, wrap up by doing the following:
    to the Context Builder: https://ai.actingweb.io/{actor_id}/app/builder
    Explain that I can create tasks there from any device (phone, browser, another
    AI session) and the agent will pick them up on its next run.
-2. Give me a summary of what the agent can do now — what default tasks are
+2. Show me ACTIONS.md and explain that this is my dashboard — the agent updates
+   it every run with action items, and I check off or annotate items.
+3. Mention personal-tasks.md — I can add my own recurring tasks there and they
+   will never be overwritten by upgrades.
+4. Give me a summary of what the agent can do now — what default tasks are
    configured, how to queue one-off tasks, and how to customize.
 ```
 
@@ -144,11 +148,18 @@ Create a cloud instance that runs the agent autonomously on a schedule.
 ## What You Get (both options)
 
 - **Autonomous task execution** — the agent processes queued tasks from an inbox
+- **ACTIONS.md dashboard** — the agent updates a dashboard every run with action items;
+  you check off items and add inline instructions
 - **Cross-session memory** — via ActingWeb, every AI session (Claude Code, Cowork,
   ChatGPT) shares the same memory layer
 - **Task inbox** — drop a `.txt` or `.md` file in a folder and the agent picks it up
-- **Email triage and calendar preview** — optional Gmail and Calendar MCP connections
+- **Email triage** — Gmail integration with draft management, newsletter digest,
+  follow-up tracking, and unsubscribe suggestions
+- **Calendar preview** — Google Calendar integration with meeting prep and email cross-reference
+- **Daily news report** — compiled from your email newsletters, filtered by your interests
 - **Self-improving** — the agent reads instruction files that you (or the agent) can edit
+- **Upgrade-safe personalization** — your customizations (personal context, writing style,
+  custom tasks) are preserved when system files are updated
 
 ---
 
@@ -182,15 +193,21 @@ Claude Code provides a URL to open manually — see your option's setup guide.
 
 ## Task Architecture
 
-The agent processes three task sources in order:
+The agent processes four task sources in order:
 
 ### 1. Default Tasks (every run)
 
-Defined in `ai/instructions/default-tasks.md`. Includes email triage, calendar preview,
-inbox scan, memory hygiene (weekly), and sync health checks.
-Edit the file to customize.
+Defined in `ai/instructions/default-tasks.md`. Includes email triage (with newsletter
+digest, follow-up tracking, unsubscribe suggestions), calendar preview (with meeting
+prep), inbox scan, memory hygiene (weekly), daily news report, and self-review.
+This is a system file — updated on upgrade, not meant for user edits.
 
-### 2. Inbox Tasks (one-off)
+### 2. Personal Tasks (every run)
+
+Defined in `ai/instructions/personal-tasks.md`. Add your own recurring tasks here
+using the same format as default-tasks.md. This file is never overwritten by upgrades.
+
+### 3. Inbox Tasks (one-off)
 
 Drop `.txt` or `.md` files in the `INBOX/` folder at the root of your brain directory:
 
@@ -204,7 +221,7 @@ echo "Research pricing for t4g instances" > ~/brain/INBOX/research.txt
 After execution, files move to `INBOX/_processed/` with a date prefix.
 Results are written to `output/tasks/`.
 
-### 3. ActingWeb Tasks
+### 4. ActingWeb Tasks
 
 Create tasks from anywhere using the **Context Builder** — a guided wizard at
 `https://ai.actingweb.io/{actor_id}/app/builder` where you describe what you
@@ -218,20 +235,25 @@ This works in both Option A and Option B.
 
 ## Brain Directory Structure
 
-| File | Purpose |
-|---|---|
-| `CLAUDE.md` | Workspace instructions for Claude Code |
-| `ai/instructions/tasks.md` | Task type definitions and execution rules |
-| `ai/instructions/default-tasks.md` | Recurring tasks (run every cycle) |
-| `ai/instructions/personal.md` | Personal context for the agent (fill in during setup) |
-| `ai/instructions/style.md` | Writing style rules (fill in during setup) |
-| `INBOX/` | Drop tasks here (.txt or .md) |
-| `INBOX/_processed/` | Completed inbox tasks |
-| `output/tasks/` | Results from scheduled runs and ActingWeb tasks |
-| `output/logs/` | Run logs from each agent cycle |
-| `output/research/` | Research output — meeting prep, background research |
-| `output/improvements/` | Self-review proposals — agent-suggested improvements |
-| `output/.agent-heartbeat` | Last-run timestamp (for monitoring) |
+| File | Updated on upgrade? | Purpose |
+|---|---|---|
+| `CLAUDE.md` | Yes (system) | Workspace instructions for Claude Code |
+| `ACTIONS.md` | No (user) | Owner's dashboard — action items, updated every run |
+| `ai/instructions/tasks.md` | Yes (system) | Task execution rules |
+| `ai/instructions/default-tasks.md` | Yes (system) | Built-in recurring tasks |
+| `ai/instructions/personal-tasks.md` | No (user) | Your custom recurring tasks |
+| `ai/instructions/personal.md` | No (user) | Personal context (fill in during setup) |
+| `ai/instructions/style.md` | No (user) | Writing style rules (fill in during setup) |
+| `templates/` | No | Obsidian document templates |
+| `INBOX/` | — | Drop tasks here (.txt or .md) |
+| `INBOX/_processed/` | — | Completed inbox tasks |
+| `output/tasks/` | — | Results from scheduled runs and ActingWeb tasks |
+| `output/logs/` | — | Run logs from each agent cycle |
+| `output/emails/` | — | Email drafts, daily digest, follow-up tracker |
+| `output/news/` | — | Daily news reports from newsletters |
+| `output/research/` | — | Research output — meeting prep, background research |
+| `output/improvements/` | — | Self-review proposals — agent-suggested improvements |
+| `output/.agent-heartbeat` | — | Last-run timestamp (for monitoring) |
 
 ---
 
@@ -243,7 +265,8 @@ paths, the server file layout after deployment, and the task execution flow.
 
 | File | Purpose |
 |---|---|
-| `templates/` | Template instruction files for the brain directory |
+| `templates/` | Template files for the brain directory (system + user files) |
+| `templates/obsidian/` | Obsidian document templates (installed to `brain/templates/`) |
 | `docs/local-setup.md` | Option A setup guide |
 | `docs/aws-setup.md` | Option B setup guide |
 | `docs/customization.md` | Customization guide (adding tasks, MCP servers, etc.) |

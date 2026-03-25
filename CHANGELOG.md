@@ -4,7 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [Mar 25, 2026]
+
+### Added
+
+- Add ACTIONS.md owner dashboard — agent updates it every run with action items, owner checks off or annotates
+- Add personal-tasks.md for user-defined recurring tasks that are preserved on upgrade
+- Add newsletter digest, follow-up tracking, and unsubscribe suggestions to email triage
+- Add email cross-reference to calendar meeting prep (surfaces unresolved threads before meetings)
+- Add daily news report task — compiles news from email newsletters filtered by personal interests
+- Add Obsidian document templates (ai instruction, daily note, email, scratchpad, task)
+- Add interest keywords and professional influences sections to personal.md template
+- Add `--upgrade` flag to install-templates.sh — overwrites system files while preserving user customizations
+
+### Changed
+
+- Split template files into system files (CLAUDE.md, tasks.md, default-tasks.md) and user files (personal.md, style.md, personal-tasks.md, ACTIONS.md)
+- Replace `_agent-attention-needed` files with ACTIONS.md dashboard workflow
+- Expand task sources from 3 to 4 (default tasks → personal tasks → inbox → ActingWeb)
+- Increase per-task time budget from 5 to 10 minutes
+- Condense logging format to audit-trail style (decisions and changes, not routine checks)
+- Update ARCHITECTURE.md and README.md to reflect new dashboard, task sources, and directory structure
 
 ### Fixed
 

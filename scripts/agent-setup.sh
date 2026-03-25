@@ -80,7 +80,7 @@ fi
 
 # 1b. Template files installed
 TEMPLATES_INSTALLED=true
-for tmpl in tasks.md default-tasks.md personal.md style.md; do
+for tmpl in tasks.md default-tasks.md personal.md style.md personal-tasks.md; do
   if [[ ! -f "${BRAIN_DIR}/ai/instructions/${tmpl}" ]]; then
     TEMPLATES_INSTALLED=false
     break
@@ -98,7 +98,7 @@ elif [[ "${VERIFY_ONLY}" == "true" ]]; then
 else
   if [[ -x "${HOME}/scripts/install-templates.sh" ]]; then
     log "Installing template files..."
-    "${HOME}/scripts/install-templates.sh"
+    "${HOME}/scripts/install-templates.sh" --upgrade
     ok "Templates installed"
   else
     warn "install-templates.sh not found"

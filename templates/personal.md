@@ -31,6 +31,17 @@ It is a companion to [style](style.md) (writing style instructions).
 <!-- A brief description of what you do and your professional identity.
      Not a CV — just enough for the agent to write authentically on your behalf. -->
 
+### Professional Influences & References
+
+<!-- List people, frameworks, or thinkers you regularly reference in your work.
+     This helps the agent write authentically and cite the right influences.
+     Example:
+     - **Marty Cagan** — product management thought leader
+     - **Steve Blank** — customer development. Formative influence.
+-->
+
+-
+
 ### Topics & Interests
 
 <!-- What do you care about professionally? What do you write or talk about?
@@ -39,6 +50,17 @@ It is a companion to [style](style.md) (writing style instructions).
 **Professional topics**:
 
 **Personal interests**:
+
+### Interest Keywords for Email Filtering
+
+<!-- Used by the agent during email triage to flag newsletters worth reading
+     (see default-tasks.md, Newsletter & Promotional Digest). Update as interests evolve. -->
+
+**Professional**: <!-- e.g. AI, product management, engineering leadership, scaling product -->
+
+**Technical**: <!-- e.g. TypeScript, Python, API design, infrastructure -->
+
+**Personal**: <!-- e.g. running, travel deals, local events -->
 
 ---
 

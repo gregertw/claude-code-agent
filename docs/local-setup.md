@@ -38,13 +38,23 @@ mkdir -p "$BRAIN_DIR/output/tasks"
 mkdir -p "$BRAIN_DIR/output/logs"
 mkdir -p "$BRAIN_DIR/output/research"
 mkdir -p "$BRAIN_DIR/output/improvements"
+mkdir -p "$BRAIN_DIR/output/emails"
+mkdir -p "$BRAIN_DIR/output/news"
+mkdir -p "$BRAIN_DIR/templates"
 
-# Copy templates
+# Copy system templates (these get updated on upgrade)
 cp templates/CLAUDE.md "$BRAIN_DIR/CLAUDE.md"
 cp templates/tasks.md "$BRAIN_DIR/ai/instructions/tasks.md"
 cp templates/default-tasks.md "$BRAIN_DIR/ai/instructions/default-tasks.md"
+
+# Copy user templates (these are yours to customize — never overwritten)
+cp templates/ACTIONS.md "$BRAIN_DIR/ACTIONS.md"
+cp templates/personal-tasks.md "$BRAIN_DIR/ai/instructions/personal-tasks.md"
 cp templates/personal.md "$BRAIN_DIR/ai/instructions/personal.md"
 cp templates/style.md "$BRAIN_DIR/ai/instructions/style.md"
+
+# Copy Obsidian document templates
+cp templates/obsidian/*.md "$BRAIN_DIR/templates/"
 
 # Replace placeholder in CLAUDE.md
 sed -i '' 's/{OUTPUT_FOLDER}/output/g' "$BRAIN_DIR/CLAUDE.md"
@@ -53,8 +63,9 @@ sed -i '' 's/{OUTPUT_FOLDER}/output/g' "$BRAIN_DIR/CLAUDE.md"
 > **Note**: The `sed -i ''` syntax is for macOS. On Linux, use `sed -i` (without
 > the empty quotes).
 
-The `personal.md` and `style.md` files are templates with placeholder sections.
-The agent will help you fill them in during your first session.
+The `personal.md`, `style.md`, and `personal-tasks.md` files are yours to customize —
+they are never overwritten on upgrade. The agent will help you fill in `personal.md`
+and `style.md` during your first session.
 
 ## Step 3: Set up MCP connections
 
@@ -86,15 +97,26 @@ These run on every scheduled cycle (or when you say "Run the default task cycle 
 
 | Task | What it does | Requires |
 |---|---|---|
-| **Email Triage** | Scans inbox, categorizes messages, flags time-sensitive items | Gmail MCP |
-| **Calendar Preview** | Shows today's/tomorrow's events, flags conflicts | Google Calendar MCP |
+| **Email Triage** | Scans inbox, drafts replies, newsletter digest, follow-up tracking, unsubscribe suggestions | Gmail MCP |
+| **Calendar Preview** | Shows today's/tomorrow's events, flags conflicts, preps meetings with email cross-reference | Google Calendar MCP |
 | **Inbox Folder Scan** | Executes `.txt` and `.md` files dropped in `INBOX/` | — |
 | **ActingWeb Task Check** | Executes tasks queued via the Context Builder | ActingWeb MCP |
 | **Memory Hygiene** | Weekly — scans for duplicate or outdated memories | ActingWeb MCP |
 | **Self-Review** | Daily — reviews logs, writes improvement proposals | ActingWeb MCP |
 | **Heartbeat Check** | Verifies the agent ran recently | — |
+| **Daily News Report** | Daily — compiles news from newsletters filtered by your interests | Gmail + ActingWeb MCP |
 
 Tasks that require an MCP connection you haven't set up are skipped automatically.
+
+### ACTIONS.md — Your Dashboard
+
+The agent updates `ACTIONS.md` every run with action items: meetings to prep for,
+email drafts to approve, calendar conflicts, news reports, and more. Check off
+items (or strikethrough) and the agent clears them. Add inline annotations to
+give the agent follow-up instructions.
+
+Email drafts live in `output/emails/` with a `status:` frontmatter — change
+`status: pending` to `status: approved` and the agent sends on the next run.
 
 ### Queue Tasks
 

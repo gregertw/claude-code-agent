@@ -1,8 +1,12 @@
 # Customization Guide
 
-## Adding Default Tasks
+## Adding Your Own Recurring Tasks
 
-Edit `ai/instructions/default-tasks.md` in your brain directory. Follow the existing format:
+Add custom recurring tasks to `ai/instructions/personal-tasks.md` in your brain
+directory. This file is never overwritten by upgrades — it's your space for custom
+recurring work.
+
+Follow the same format as `default-tasks.md`:
 
 ```markdown
 ## N. Task Name
@@ -15,6 +19,26 @@ Description of what the task should do...
 ```
 
 Keep each task small (under 2 minutes). The agent will defer tasks that seem too large.
+
+> **Note**: Do not edit `default-tasks.md` directly — it is a system file that gets
+> updated on upgrade. Use `personal-tasks.md` for your additions instead.
+
+## Template Upgrade Strategy
+
+Template files are divided into **system files** and **user files**:
+
+| Type | Files | On upgrade |
+|---|---|---|
+| System | `CLAUDE.md`, `tasks.md`, `default-tasks.md` | Overwritten with latest version |
+| User | `personal.md`, `style.md`, `personal-tasks.md`, `ACTIONS.md` | Preserved — never overwritten |
+
+To upgrade system files on an existing brain, run:
+
+```bash
+~/scripts/install-templates.sh --upgrade
+```
+
+This updates the agent's core instructions while preserving all your customizations.
 
 ## Adding MCP Servers
 
