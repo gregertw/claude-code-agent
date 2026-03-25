@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Fixed
+
+- Fix `--history` ignoring CloudWatch data when AWS returns non-UTC timezone offsets (e.g. `+01:00`)
+
 ## 2026-03-24
 
 ### Added

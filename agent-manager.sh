@@ -723,13 +723,11 @@ for d in range(days):
 awake = set()
 for dp in cw_raw.get("Datapoints", []):
     ts = dp["Timestamp"]
-    for fmt in ("%Y-%m-%dT%H:%M:%S+00:00", "%Y-%m-%dT%H:%M:%SZ"):
-        try:
-            dt = datetime.strptime(ts, fmt).replace(tzinfo=timezone.utc)
-            break
-        except ValueError:
-            continue
-    else:
+    try:
+        dt = datetime.fromisoformat(ts)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+    except ValueError:
         continue
     local_dt = dt.astimezone(local_tz)
     ds = local_dt.strftime("%Y-%m-%d")
