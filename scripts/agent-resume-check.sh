@@ -18,11 +18,16 @@ if [[ -f "${SCRIPTS_DIR}/agent-functions.sh" ]]; then
   source "${SCRIPTS_DIR}/agent-functions.sh"
 fi
 
-# Active-hours guard
-if ! check_active_hours "${SCHEDULE_HOURS:-6-22}" "${SCHEDULE_WEEKEND_HOURS:-}"; then
-  echo "Resume check: outside active hours (${SCHEDULE_HOURS:-6-22}, weekend: ${SCHEDULE_WEEKEND_HOURS:-same}). Stopping."
-  do_hibernate "Outside active hours (resume)"
-  exit 0
+# Keep-running lock bypasses active-hours guard
+if [[ -f "${HOME_DIR}/agents/.keep-running" ]]; then
+  echo "Resume check: keep-running lock found. Bypassing active-hours guard."
+else
+  # Active-hours guard
+  if ! check_active_hours "${SCHEDULE_HOURS:-6-22}" "${SCHEDULE_WEEKEND_HOURS:-}"; then
+    echo "Resume check: outside active hours (${SCHEDULE_HOURS:-6-22}, weekend: ${SCHEDULE_WEEKEND_HOURS:-same}). Stopping."
+    do_hibernate "Outside active hours (resume)"
+    exit 0
+  fi
 fi
 
 # Heartbeat interval check — use 80% of interval to account for boot time

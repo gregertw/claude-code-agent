@@ -81,3 +81,30 @@ SETUP_GMAIL=false
 # Uses Anthropic's hosted connector at https://gcal.mcp.claude.com/mcp
 # Authentication is via interactive Google sign-in (no credentials needed)
 SETUP_GOOGLE_CALENDAR=false
+
+# --- Claude CLI ---------------------------------------------------------------
+# These settings control the flags passed to 'claude -p' in the orchestrator
+# and run-agent.sh scripts.
+
+# Model to use (e.g. "sonnet", "opus", "haiku", or a full model ID).
+# Leave empty to use Claude Code's default.
+#CLAUDE_MODEL=""
+
+# Maximum conversation turns per run (prevents runaway loops)
+CLAUDE_MAX_TURNS=50
+
+# Output format: "text", "json", or "stream-json"
+CLAUDE_OUTPUT_FORMAT="text"
+
+# Permission mode: "default", "acceptEdits", "bypassPermissions", "plan", "auto"
+# For autonomous server runs, "bypassPermissions" is typical.
+#CLAUDE_PERMISSION_MODE=""
+
+# Maximum dollar budget per run (leave empty for unlimited)
+#CLAUDE_MAX_BUDGET_USD=""
+
+# Enable verbose output (true/false)
+CLAUDE_VERBOSE=false
+
+# Additional CLI flags passed verbatim to claude (advanced, use with care)
+#CLAUDE_EXTRA_FLAGS=""

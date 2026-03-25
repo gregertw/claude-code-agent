@@ -309,12 +309,21 @@ cmd_wakeup() {
     sleep 5
   done
 
+  # In scheduled mode, immediately create keep-running lock to prevent the
+  # orchestrator's active-hours guard from hibernating before we can act.
+  if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" ]]; then
+    ssh -o ConnectTimeout=5 "${SSH_HOST}" 'mkdir -p ~/agents && touch ~/agents/.keep-running' 2>/dev/null || true
+    log "Keep-running lock set (prevents auto-hibernate)."
+  fi
+
   echo ""
   log "Server is ready."
   log "SSH: ssh ${SSH_HOST}"
-  echo ""
-  warn "In scheduled mode, the boot runner may have already started."
-  warn "To prevent self-stop: ssh ${SSH_HOST} 'touch ~/agents/.keep-running'"
+  if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" ]]; then
+    echo ""
+    warn "Keep-running lock is active. Server will NOT self-stop."
+    warn "To release: ssh ${SSH_HOST} 'rm ~/agents/.keep-running'"
+  fi
   echo ""
 }
 
@@ -332,6 +341,9 @@ cmd_sleep() {
     err "Instance is in state '${state}' — can only stop a running instance."
     return 1
   fi
+
+  # Remove keep-running lock before stopping
+  ssh -o ConnectTimeout=5 "${SSH_HOST}" 'rm -f ~/agents/.keep-running' 2>/dev/null || true
 
   log "Hibernating instance ${INSTANCE_ID}..."
   aws ec2 stop-instances --instance-ids "${INSTANCE_ID}" --region "${REGION}" --hibernate >/dev/null 2>&1 || {

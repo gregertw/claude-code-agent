@@ -69,6 +69,12 @@ fi
 # Source schedule AFTER agent.conf so SCHEDULE_* from set-schedule-mode.sh wins
 source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
 
+# --- Keep-running lock (checked early so manual wakeups bypass hours guard) ---
+if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && -f "${HOME_DIR}/agents/.keep-running" ]]; then
+  echo "Lock file found (~/.keep-running). Bypassing active-hours guard and self-stop."
+  NO_STOP="--no-stop"
+fi
+
 # --- Active-hours guard (scheduled mode only) --------------------------------
 # If running in scheduled mode outside active hours, skip the run and self-stop.
 # This prevents the server from staying awake if woken by a stale schedule,
@@ -111,11 +117,6 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
   fi
 fi
 
-# Check for keep-running lock (in scheduled mode)
-if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && -f "${HOME_DIR}/agents/.keep-running" ]]; then
-  echo "Lock file found (~/.keep-running). Skipping self-stop."
-  NO_STOP="--no-stop"
-fi
 
 # --- 1. Wait for network ----------------------------------------------------
 echo "Checking network..."
@@ -267,13 +268,25 @@ for server in "${MCP_SERVERS[@]}"; do
   ALLOWED_TOOLS+=("mcp__${server}")
 done
 
+# Build CLI flags from agent.conf settings
+CLAUDE_FLAGS=(-p "${MASTER_PROMPT}")
+CLAUDE_FLAGS+=(--output-format "${CLAUDE_OUTPUT_FORMAT:-text}")
+CLAUDE_FLAGS+=(--max-turns "${CLAUDE_MAX_TURNS:-50}")
+CLAUDE_FLAGS+=(--allowedTools "${ALLOWED_TOOLS[@]}")
+
+[[ -n "${CLAUDE_MODEL:-}" ]] && CLAUDE_FLAGS+=(--model "${CLAUDE_MODEL}")
+[[ -n "${CLAUDE_PERMISSION_MODE:-}" ]] && CLAUDE_FLAGS+=(--permission-mode "${CLAUDE_PERMISSION_MODE}")
+[[ -n "${CLAUDE_MAX_BUDGET_USD:-}" ]] && CLAUDE_FLAGS+=(--max-budget-usd "${CLAUDE_MAX_BUDGET_USD}")
+[[ "${CLAUDE_VERBOSE:-false}" == "true" ]] && CLAUDE_FLAGS+=(--verbose)
+
+# Append any extra flags (split on whitespace — use with care)
+if [[ -n "${CLAUDE_EXTRA_FLAGS:-}" ]]; then
+  read -ra _extra <<< "${CLAUDE_EXTRA_FLAGS}"
+  CLAUDE_FLAGS+=("${_extra[@]}")
+fi
+
 # Run Claude in non-interactive mode with the master prompt
-# --max-turns prevents infinite loops in autonomous mode
-claude -p "${MASTER_PROMPT}" \
-  --output-format text \
-  --max-turns 50 \
-  --allowedTools "${ALLOWED_TOOLS[@]}" \
-  2>&1 | tee "${RUN_LOG}"
+claude "${CLAUDE_FLAGS[@]}" 2>&1 | tee "${RUN_LOG}"
 
 CLAUDE_EXIT=$?
 echo ""

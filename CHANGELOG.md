@@ -16,9 +16,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Add Obsidian document templates (ai instruction, daily note, email, scratchpad, task)
 - Add interest keywords and professional influences sections to personal.md template
 - Add `--upgrade` flag to install-templates.sh — overwrites system files while preserving user customizations
+- Add configurable Claude CLI flags in agent.conf (model, max-turns, output-format, permission-mode, max-budget, verbose, extra flags)
+- Support CLI flag configuration in both orchestrator and run-agent.sh
 
 ### Changed
 
+- `--wakeup` now auto-sets keep-running lock in scheduled mode so server stays up for manual work
+- `--sleep` removes the keep-running lock before hibernating
 - Split template files into system files (CLAUDE.md, tasks.md, default-tasks.md) and user files (personal.md, style.md, personal-tasks.md, ACTIONS.md)
 - Replace `_agent-attention-needed` files with ACTIONS.md dashboard workflow
 - Expand task sources from 3 to 4 (default tasks → personal tasks → inbox → ActingWeb)
@@ -29,6 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 ### Fixed
 
 - Fix `--history` ignoring CloudWatch data when AWS returns non-UTC timezone offsets (e.g. `+01:00`)
+- Fix server immediately hibernating on manual wakeup outside active hours — keep-running lock now bypasses the active-hours guard
 
 ## 2026-03-24
 
