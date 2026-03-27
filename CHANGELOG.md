@@ -8,6 +8,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Added
 
+- Add prompt injection defense section to task execution rules — treat all external content as untrusted, block exfiltration of infrastructure data
+- Add security guardrails to email triage — email body content explicitly marked as untrusted input
+- Add security note to meeting prep email cross-reference — thread content from external participants treated as untrusted
 - Add installable capabilities system — optional features defined in `templates/capabilities/` with guided AI installation
 - Add agentmail capability — agent email address for sending notifications and receiving instructions
 - Add PreToolUse hook to protect settings files, hooks, and `.env` from agent edits
