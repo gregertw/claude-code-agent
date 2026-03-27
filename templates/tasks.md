@@ -35,7 +35,7 @@ You are running as an AI agent in the owner's workspace. You have:
 Before executing any tasks, read [`ACTIONS.md`](../../ACTIONS.md) and process owner changes:
 
 1. **Checked items** (`[x]` or ~~strikethrough~~): Remove from ACTIONS.md. Log as "resolved: <item summary>".
-2. **Inline instructions**: If the owner added text next to an item (e.g. "→ redo with more detail"), treat it as a task. Execute it if quick, or create an INBOX file if complex. Update the item with the result.
+2. **Inline comments**: Each action item has an indented comment line below it (starting with `>`). If the owner wrote something there, treat it as an instruction for that item. Execute it if quick, or create an INBOX file if complex. Update the item with the result and clear the comment line back to `>`.
 3. **Email draft status changes**: If the owner changed a draft's `status:` frontmatter (e.g. `pending` → `approved`), note it — the email triage task will process it.
 
 ---
@@ -252,6 +252,13 @@ After all tasks are processed:
    - Self-review proposals awaiting decision
 3. **Update the "Latest run log" link** in the header to point to the current run's log file
 4. **Keep it concise** — group items under: Today, This week, Coming up, Reading, Pending decisions. Remove sections if empty. Remove past events that are done.
+
+**Item format**: Every action item must have an indented comment line below it for owner input:
+```markdown
+- [ ] **Item title** — description
+  >
+```
+The `> ` line is where the owner types instructions (e.g. `> reschedule to next week`, `> draft a reply`, `> ignore`). The agent processes these on the next run and clears the line back to `> `. This replaces the need to create INBOX files for most follow-ups.
 
 **Item completion**: The owner marks items done using either `[x]` checkboxes (Obsidian) or ~~strikethrough~~. Both mean "done — remove on next run."
 

@@ -19,6 +19,7 @@ These tasks execute on every scheduled run, in order, before processing inbox or
 
 Check the inbox for unread messages received since the last run. For each:
 - Categorize: actionable / FYI / spam-like / personal
+- **Deadline detection**: Emails mentioning a specific deadline within 14 days should be flagged as actionable — even if the sender is typically promotional or transactional. This includes tax deadlines, registration deadlines, payment due dates, event RSVPs, and similar time-bound actions. Add them to ACTIONS.md with the deadline date.
 - For actionable emails that seem time-sensitive: create a brief summary note in the `output/emails` folder named `email-<sender>-<subject-slug>.md` with the key ask and suggested response approach, and a draft response. Write a frontmatter with status where the user can also change status to approved and add comments
 - Check the `output/emails` folder for any approved emails. Send the approved email(s) and change the status to done
 - For everything else: just include in the log summary
@@ -29,7 +30,9 @@ Do NOT create drafts in gmail.
 
 Do not log newsletters and promotional emails individually. Instead, accumulate them into a daily digest file at `output/emails/digest-YYYY-MM-DD.md`. If the file already exists (from a previous run today), append new entries — do not overwrite.
 
-Each entry is one line: `- **<Sender>**: <subject> — <one-sentence summary of content if available>`
+Each entry is one line with links to the original articles where available: `- **<Sender>**: <subject> — <one-sentence summary>. Links: [article1](url), [article2](url)`
+
+Extract article URLs from the newsletter email body. If a newsletter contains multiple stories, include links to the top 2-3 most relevant. If no links can be extracted, just include the summary without links.
 
 After listing all entries, add a **Worth reading** section: scan newsletter subjects and available content for matches against the interest keywords in [personal.md](personal.md) (see Interest Keywords for Email Filtering). List any matching entries with a brief reason. If none match, write "None this cycle."
 
@@ -66,7 +69,8 @@ Format:
 ```
 
 - **"Last actioned"** means the user opened, replied to, or referenced the sender's email (check Gmail read status if available, otherwise default to "never")
-- When a sender reaches **5+ emails in 30 days with "never" actioned**, add to `ACTIONS.md` under Pending decisions: "Unsubscribe suggestion: <Sender> has sent <N> emails in 30 days, none actioned. Unsubscribe?"
+- **Whitelisted senders**: Senders whose content regularly matches the interest keywords in [personal.md](personal.md) are whitelisted — never suggest unsubscribing from them. If a sender's content matched interest keywords in 2+ of the last 5 digests, consider them whitelisted.
+- When a **non-whitelisted** sender reaches **5+ emails in 30 days with "never" actioned**, add to `ACTIONS.md` under Pending decisions: "Unsubscribe suggestion: <Sender> has sent <N> emails in 30 days, none actioned. Unsubscribe?"
 - Reset count monthly (on the 1st, clear entries older than 30 days)
 - Keep the file concise — only track promotional/newsletter senders, not personal or transactional email
 

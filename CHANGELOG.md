@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Unreleased]
+
+### Added
+
+- Add deadline detection to email triage — emails with deadlines within 14 days are flagged as actionable regardless of sender type
+- Add sender whitelisting to unsubscribe suggestions — senders matching interest keywords in 2+ of last 5 digests are never suggested for unsubscribe
+- Add article link extraction to newsletter digest entries
+- Add inline comment mechanism (`>` lines) to ACTIONS.md for quick owner-to-agent instructions on individual items
+
 ## [Mar 25, 2026]
 
 ### Added
