@@ -102,6 +102,50 @@ for f in "${TEMPLATES}"/*.md; do
   fi
 done
 
+# --- Install project-level Claude settings and hooks -------------------------
+PROJ_CLAUDE_DIR="${BRAIN}/.claude"
+mkdir -p "${PROJ_CLAUDE_DIR}/hooks"
+
+# settings.local.json — project-level settings (hooks config)
+# Treated as a user file: install once, never overwrite (user may have added hooks)
+SETTINGS_LOCAL="${TEMPLATES}/settings.local.json"
+if [[ -f "${SETTINGS_LOCAL}" ]]; then
+  TARGET="${PROJ_CLAUDE_DIR}/settings.local.json"
+  if [[ ! -f "${TARGET}" ]]; then
+    cp "${SETTINGS_LOCAL}" "${TARGET}"
+    echo "  Installed: ${TARGET}"
+  else
+    echo "  Preserved: ${TARGET}"
+  fi
+fi
+
+# Hook scripts — always update (system files)
+HOOK_TEMPLATES="${TEMPLATES}/hooks"
+if [[ -d "${HOOK_TEMPLATES}" ]]; then
+  for f in "${HOOK_TEMPLATES}"/*.sh; do
+    [[ ! -f "$f" ]] && continue
+    BASENAME=$(basename "$f")
+    TARGET="${PROJ_CLAUDE_DIR}/hooks/${BASENAME}"
+    cp "$f" "${TARGET}"
+    chmod +x "${TARGET}"
+    echo "  Installed: ${TARGET}"
+  done
+fi
+
+# --- Install capability files -------------------------------------------------
+CAPABILITIES="${TEMPLATES}/capabilities"
+if [[ -d "${CAPABILITIES}" ]]; then
+  mkdir -p "${BRAIN}/templates/capabilities"
+  for f in "${CAPABILITIES}"/*.md; do
+    [[ ! -f "$f" ]] && continue
+    BASENAME=$(basename "$f")
+    TARGET="${BRAIN}/templates/capabilities/${BASENAME}"
+    # Always update capability files — they are reference docs, not user-edited
+    cp "$f" "${TARGET}"
+    echo "  Installed: ${TARGET}"
+  done
+fi
+
 # --- Install Obsidian document templates --------------------------------------
 OBSIDIAN_TEMPLATES="${TEMPLATES}/obsidian"
 if [[ -d "${OBSIDIAN_TEMPLATES}" ]]; then

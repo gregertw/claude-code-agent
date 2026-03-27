@@ -56,6 +56,16 @@ cp templates/style.md "$BRAIN_DIR/ai/instructions/style.md"
 # Copy Obsidian document templates
 cp templates/obsidian/*.md "$BRAIN_DIR/templates/"
 
+# Copy capability files (optional installable features)
+mkdir -p "$BRAIN_DIR/templates/capabilities"
+cp templates/capabilities/*.md "$BRAIN_DIR/templates/capabilities/"
+
+# Install project-level settings and hooks
+mkdir -p "$BRAIN_DIR/.claude/hooks"
+cp templates/settings.local.json "$BRAIN_DIR/.claude/settings.local.json"
+cp templates/hooks/protect-settings.sh "$BRAIN_DIR/.claude/hooks/protect-settings.sh"
+chmod +x "$BRAIN_DIR/.claude/hooks/protect-settings.sh"
+
 # Replace placeholder in CLAUDE.md
 sed -i '' 's/{OUTPUT_FOLDER}/output/g' "$BRAIN_DIR/CLAUDE.md"
 ```
@@ -138,7 +148,18 @@ The agent reviews its performance daily and writes proposals to
 `output/improvements/`. It never auto-modifies its own instructions — it
 proposes and waits for your approval.
 
+### Install Capabilities
+
+Extend the agent with optional features from `templates/capabilities/`:
+
+```
+Install the agentmail capability.
+```
+
+The AI walks you through configuration and makes all necessary changes. See the
+[Customization Guide](customization.md) for the full list.
+
 ### Customize
 
 See the [Customization Guide](customization.md) for adding tasks, MCP servers,
-and more.
+capabilities, and more.

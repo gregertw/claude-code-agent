@@ -4,14 +4,25 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
-## [Unreleased]
+## [Mar 27, 2026]
 
 ### Added
 
+- Add installable capabilities system — optional features defined in `templates/capabilities/` with guided AI installation
+- Add agentmail capability — agent email address for sending notifications and receiving instructions
+- Add PreToolUse hook to protect settings files, hooks, and `.env` from agent edits
 - Add deadline detection to email triage — emails with deadlines within 14 days are flagged as actionable regardless of sender type
 - Add sender whitelisting to unsubscribe suggestions — senders matching interest keywords in 2+ of last 5 digests are never suggested for unsubscribe
 - Add article link extraction to newsletter digest entries
 - Add inline comment mechanism (`>` lines) to ACTIONS.md for quick owner-to-agent instructions on individual items
+- Add "Last updated" timestamp to ACTIONS.md header, updated by the agent each run
+
+### Changed
+
+- Expand default permissions to allow curl, source, python3, cp, jq, and other common commands for autonomous operation
+- Add explicit deny list for destructive commands (rm -rf, git push --force, git reset --hard, etc.)
+- Preserve existing `settings.json` when `setup.sh` is re-run on an existing server
+- `agent upgrade` now copies capabilities, hooks, and project settings from the repo
 
 ## [Mar 25, 2026]
 

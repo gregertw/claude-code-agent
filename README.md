@@ -84,7 +84,9 @@ After personalization, wrap up by doing the following:
    it every run with action items, and I check off or annotate items.
 3. Mention personal-tasks.md — I can add my own recurring tasks there and they
    will never be overwritten by upgrades.
-4. Give me a summary of what the agent can do now — what default tasks are
+4. Check templates/capabilities/ for available optional capabilities (like agent
+   email) and briefly list them — offer to install any that interest me.
+5. Give me a summary of what the agent can do now — what default tasks are
    configured, how to queue one-off tasks, and how to customize.
 ```
 
@@ -158,6 +160,8 @@ Create a cloud instance that runs the agent autonomously on a schedule.
 - **Calendar preview** — Google Calendar integration with meeting prep and email cross-reference
 - **Daily news report** — compiled from your email newsletters, filtered by your interests
 - **Self-improving** — the agent reads instruction files that you (or the agent) can edit
+- **Installable capabilities** — extend the agent with optional features (agent email,
+  etc.) via guided installation from capability files
 - **Upgrade-safe personalization** — your customizations (personal context, writing style,
   custom tasks) are preserved when system files are updated
 
@@ -245,6 +249,7 @@ This works in both Option A and Option B.
 | `ai/instructions/personal.md` | No (user) | Personal context (fill in during setup) |
 | `ai/instructions/style.md` | No (user) | Writing style rules (fill in during setup) |
 | `templates/` | No | Obsidian document templates |
+| `templates/capabilities/` | No | Optional installable capabilities |
 | `INBOX/` | — | Drop tasks here (.txt or .md) |
 | `INBOX/_processed/` | — | Completed inbox tasks |
 | `output/tasks/` | — | Results from scheduled runs and ActingWeb tasks |
@@ -266,6 +271,7 @@ paths, the server file layout after deployment, and the task execution flow.
 | File | Purpose |
 |---|---|
 | `templates/` | Template files for the brain directory (system + user files) |
+| `templates/capabilities/` | Optional installable capabilities (agent email, etc.) |
 | `templates/obsidian/` | Obsidian document templates (installed to `brain/templates/`) |
 | `docs/local-setup.md` | Option A setup guide |
 | `docs/aws-setup.md` | Option B setup guide |

@@ -1,5 +1,43 @@
 # Customization Guide
 
+## Installing Capabilities
+
+Capabilities are optional features that extend what the agent can do. Each
+capability is defined in a single file under `templates/capabilities/` in the
+repo (or `templates/capabilities/` in your brain directory after setup).
+
+**Available capabilities:**
+
+| Capability | Description |
+|---|---|
+| `agentmail` | Agent email address for sending notifications and receiving instructions |
+
+**How to install:**
+
+Start a session in your brain directory and say:
+```
+Install the <name> capability.
+```
+
+The AI reads the capability file, asks for any required configuration (API keys,
+preferences), and makes all necessary changes to your brain directory — adding
+task types, recurring tasks, skills, and environment variables as needed.
+
+You can also trigger installation by dropping a file in `INBOX/`:
+```
+Install the agentmail capability. My API key is am_us_...
+```
+
+Or by adding an inline comment on an ACTIONS.md item:
+```
+> Install the agentmail capability
+```
+
+Each capability file documents exactly what gets created and modified, and
+includes uninstallation instructions.
+
+---
+
 ## Adding Your Own Recurring Tasks
 
 Add custom recurring tasks to `ai/instructions/personal-tasks.md` in your brain
@@ -73,21 +111,38 @@ The prompt is templated with variables from `agent.conf`:
 
 ## Customizing Claude Code Permissions
 
-Edit `~/.claude/settings.json` to control what Claude can do autonomously:
+Permissions are split across two files:
+
+- **`~/.claude/settings.json`** (user-level) — tool permissions (allow/deny lists).
+  On Option B, this is installed by `setup.sh`.
+- **`<brain>/.claude/settings.local.json`** (project-level) — hooks and
+  project-specific overrides. Installed by `install-templates.sh`.
+
+The default permissions allow the agent to work autonomously for typical tasks
+(file operations, web search, curl for API calls, Python scripts) while blocking
+destructive operations:
 
 ```json
 {
   "permissions": {
     "allow": [
-      "mcp__actingweb",
+      "mcp__actingweb", "mcp__gmail", "mcp__google-calendar",
       "Read", "Write", "Edit", "Glob", "Grep",
-      "Bash(cat *)", "Bash(mkdir *)", "Bash(mv *)",
-      "WebSearch", "WebFetch"
+      "WebSearch", "WebFetch(domain:*)",
+      "Bash(curl:*)", "Bash(source:*)", "Bash(python3:*)",
+      "Bash(ls:*)", "Bash(cat:*)", "Bash(mkdir:*)", "Bash(cp:*)", "Bash(mv:*)",
+      "..."
     ],
-    "deny": []
+    "deny": [
+      "Bash(rm -rf:*)", "Bash(rm -r:*)",
+      "Bash(git push --force:*)", "Bash(git reset --hard:*)"
+    ]
   }
 }
 ```
+
+A **PreToolUse hook** (`protect-settings.sh`) prevents the agent from editing
+settings files, hooks, or `.env` — these must be edited manually.
 
 Add tool patterns to `allow` for new capabilities. Be cautious with broad Bash permissions.
 

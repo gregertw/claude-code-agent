@@ -352,6 +352,9 @@ log "Configuring Claude Code permissions for autonomous mode..."
 CLAUDE_SETTINGS_DIR="${HOME_DIR}/.claude"
 sudo -u "${UBUNTU_USER}" mkdir -p "${CLAUDE_SETTINGS_DIR}"
 
+if [[ -f "${CLAUDE_SETTINGS_DIR}/settings.json" ]]; then
+  log "settings.json already exists — preserving user customizations."
+else
 sudo -u "${UBUNTU_USER}" tee "${CLAUDE_SETTINGS_DIR}/settings.json" > /dev/null << 'SETTINGS'
 {
   "permissions": {
@@ -363,24 +366,67 @@ sudo -u "${UBUNTU_USER}" tee "${CLAUDE_SETTINGS_DIR}/settings.json" > /dev/null 
       "mcp__claude_ai_Gmail",
       "mcp__claude_ai_Google_Calendar",
       "mcp__claude_ai_notion",
+      "mcp__plugin_telegram_telegram__*",
       "Read",
       "Write",
       "Edit",
       "Glob",
       "Grep",
-      "Bash(cat *)",
-      "Bash(mkdir *)",
-      "Bash(mv *)",
-      "Bash(ls *)",
-      "Bash(date *)",
       "WebSearch",
-      "WebFetch"
+      "WebFetch(domain:*)",
+      "Bash(curl:*)",
+      "Bash(source:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(head:*)",
+      "Bash(tail:*)",
+      "Bash(wc:*)",
+      "Bash(date:*)",
+      "Bash(echo:*)",
+      "Bash(mkdir:*)",
+      "Bash(cp:*)",
+      "Bash(mv:*)",
+      "Bash(touch:*)",
+      "Bash(python3:*)",
+      "Bash(python:*)",
+      "Bash(pip:*)",
+      "Bash(jq:*)",
+      "Bash(grep:*)",
+      "Bash(sort:*)",
+      "Bash(sed:*)",
+      "Bash(diff:*)",
+      "Bash(basename:*)",
+      "Bash(dirname:*)",
+      "Bash(realpath:*)",
+      "Bash(pwd:*)",
+      "Bash(tee:*)",
+      "Bash(git log:*)",
+      "Bash(git status:*)",
+      "Bash(git diff:*)",
+      "Bash(git rev-parse:*)",
+      "Bash(git branch:*)",
+      "Bash(git show:*)"
     ],
-    "deny": []
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(rm -r:*)",
+      "Bash(git push --force:*)",
+      "Bash(git reset --hard:*)",
+      "Bash(git clean -f:*)",
+      "Bash(git checkout -- :*)",
+      "Bash(git branch -D:*)"
+    ]
   }
 }
 SETTINGS
 log "Claude Code permissions configured."
+fi
+
+# --- 13b. Claude Code Hooks --------------------------------------------------
+# Hooks are project-level — they go in the brain's .claude/ directory.
+# The hook script and settings.local.json are installed by install-templates.sh
+# when it sets up the brain directory.
+log "Claude Code hooks will be installed with brain templates."
 
 # --- 14. Agent Orchestrator --------------------------------------------------
 log "Installing agent orchestrator..."

@@ -777,9 +777,18 @@ cmd_upgrade() {
   if [[ -d "${REPO_DIR}/templates" ]]; then
     mkdir -p "${HOME}/.agent-templates"
     cp "${REPO_DIR}/templates/"*.md "${HOME}/.agent-templates/" 2>/dev/null || true
+    cp "${REPO_DIR}/templates/"*.json "${HOME}/.agent-templates/" 2>/dev/null || true
     if [[ -d "${REPO_DIR}/templates/obsidian" ]]; then
       mkdir -p "${HOME}/.agent-templates/obsidian"
       cp "${REPO_DIR}/templates/obsidian/"*.md "${HOME}/.agent-templates/obsidian/" 2>/dev/null || true
+    fi
+    if [[ -d "${REPO_DIR}/templates/capabilities" ]]; then
+      mkdir -p "${HOME}/.agent-templates/capabilities"
+      cp "${REPO_DIR}/templates/capabilities/"*.md "${HOME}/.agent-templates/capabilities/" 2>/dev/null || true
+    fi
+    if [[ -d "${REPO_DIR}/templates/hooks" ]]; then
+      mkdir -p "${HOME}/.agent-templates/hooks"
+      cp "${REPO_DIR}/templates/hooks/"*.sh "${HOME}/.agent-templates/hooks/" 2>/dev/null || true
     fi
   fi
 

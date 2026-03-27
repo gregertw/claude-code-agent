@@ -10,6 +10,7 @@ This file is your dashboard. The agent updates it every run. You act on it when 
 
 **Email drafts**: Drafts live in [`output/emails/`](output/emails/) with a `status:` frontmatter. Change `status: pending` to `status: approved` and the agent sends it next run. Or set `status: discard` to archive it.
 
+**Last updated**: (never)
 **Latest run log**: (none yet)
 
 ---

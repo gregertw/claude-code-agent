@@ -20,6 +20,7 @@ This workspace is managed by an AI agent. It can also be used as an
 | `{OUTPUT_FOLDER}/research/` | Research output — meeting prep, background checks, topic research. |
 | `{OUTPUT_FOLDER}/improvements/` | Self-review proposals — agent-suggested improvements to its own instructions. |
 | `templates/` | Obsidian document templates — used when creating new files. |
+| `templates/capabilities/` | Optional capabilities that can be installed to extend the agent. See [capabilities](templates/capabilities/README.md). |
 
 ## How to Work
 
@@ -51,6 +52,20 @@ create recurring scheduled tasks for the default task cycle. Use these guideline
   the schedule needs to be set up again (or included in the opening prompt)
 - **Use the default-tasks prompt**: "Run the default task cycle. Read ai/instructions/tasks.md,
   ai/instructions/default-tasks.md, and ai/instructions/personal-tasks.md, then execute all applicable tasks."
+
+## Capabilities
+
+The agent can be extended with optional capabilities from `templates/capabilities/`.
+Each capability file describes a feature (e.g. agent email, Slack integration) with
+configuration questions and step-by-step installation instructions.
+
+To install a capability, the user can:
+- Ask interactively: "Install the agentmail capability"
+- Drop a file in `INBOX/` referencing the capability
+- Add an inline comment on an ACTIONS.md item
+
+When asked to install a capability, read the corresponding file in
+`templates/capabilities/` and follow its installation instructions.
 
 ## Key Rules
 

@@ -21,6 +21,12 @@ claude-code-agent/
 │   ├── personal-tasks.md       #   User's custom recurring tasks (user — preserved)
 │   ├── personal.md             #   Personal context (user — preserved on upgrade)
 │   ├── style.md                #   Writing style rules (user — preserved on upgrade)
+│   ├── capabilities/           #   Optional installable capabilities
+│   │   ├── README.md           #     How capabilities work
+│   │   └── agentmail.md        #     Agent email via Agentmail
+│   ├── hooks/                  #   Claude Code hook scripts
+│   │   └── protect-settings.sh #     Blocks Edit/Write to settings and .env
+│   ├── settings.local.json     #   Project-level Claude settings (hooks config)
 │   └── obsidian/               #   Obsidian document templates
 │       ├── ai instruction.md   #     Template for new AI instruction files
 │       ├── daily note.md       #     Template for daily notes
@@ -87,9 +93,14 @@ feature opens that directory as a workspace. No cloud infrastructure is needed.
 │   ├── personal.md               Your personal context
 │   └── style.md                  Your writing style
 ├── ai/scratchpad/                Agent scratch space
+├── .claude/
+│   ├── settings.local.json      Project-level settings (hooks)
+│   └── hooks/
+│       └── protect-settings.sh  Blocks edits to settings and .env
 ├── INBOX/                        Drop .txt/.md files here for one-off tasks
 │   └── _processed/               Completed inbox tasks (moved here with date prefix)
 ├── templates/                    Obsidian document templates
+│   └── capabilities/            Optional installable capabilities
 └── output/
     ├── tasks/                    Task results
     ├── logs/                     Run logs
@@ -161,10 +172,15 @@ Local machine                              AWS
 │   │   ├── personal-tasks.md             User's custom recurring tasks
 │   │   ├── personal.md
 │   │   └── style.md
+│   ├── .claude/
+│   │   ├── settings.local.json          Project-level settings (hooks)
+│   │   └── hooks/
+│   │       └── protect-settings.sh      Blocks edits to settings and .env
 │   ├── ai/scratchpad/
 │   ├── INBOX/
 │   │   └── _processed/
 │   ├── templates/                        Obsidian document templates
+│   │   └── capabilities/                Optional installable capabilities
 │   └── output/
 │       ├── tasks/
 │       ├── logs/                         Symlinks to ~/logs/agent-run-*.md
@@ -271,6 +287,8 @@ Switch with `./agent-manager.sh --always-on` or `./agent-manager.sh --scheduled 
 - fail2ban: SSH brute-force protection
 - unattended-upgrades: automatic security patches
 - Secrets in `~/.agent-env` with `chmod 600`
+- PreToolUse hook blocks agent from editing settings, hooks, and `.env`
+- Destructive Bash commands (`rm -rf`, `git push --force`, etc.) explicitly denied
 - IAM role scoped to EC2 self-stop only
 
 ---
