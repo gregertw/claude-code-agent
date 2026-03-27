@@ -250,7 +250,7 @@ After all tasks are processed:
    - Calendar conflicts or upcoming meetings with prep files
    - News reports and reading recommendations
    - Self-review proposals awaiting decision
-3. **Update the header fields**: Set "Last updated" to the current date and time (`YYYY-MM-DD HH:MM`), and update the "Latest run log" link to point to the current run's log file
+3. **Update the header fields**: Set "Last updated" to the current date and time (`YYYY-MM-DD HH:MM`), and update the "Latest run log" link to point to the current run's log file. If the "Last updated" field doesn't exist in the header yet, add it on the line before the "Latest run log" line.
 4. **Keep it concise** — group items under: Today, This week, Coming up, Reading, Pending decisions. Remove sections if empty. Remove past events that are done.
 
 **Item format**: Every action item must have an indented comment line below it for owner input:
