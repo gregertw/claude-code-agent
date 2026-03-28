@@ -4,6 +4,34 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Mar 28, 2026]
+
+### Added
+
+- Add remote trigger via Lambda Function URL — start agent runs from any device (phone, iOS Shortcuts) by calling an HTTPS endpoint with a Bearer token
+- Add `deploy-trigger.sh` script to deploy, show, and remove the Lambda trigger (`--deploy`, `--show`, `--remove`)
+- Add `--trigger` command to agent-manager.sh to display the remote trigger URL and token
+- Add `--force` flag to orchestrator — bypass active-hours guard while still allowing self-stop
+- Add Lambda trigger detection to `--history` — remote-triggered runs show as "remote trigger → orchestrator started"
+- Add iOS Shortcuts step-by-step setup instructions to aws-setup.md
+- Add wake/run behavior reference table to ARCHITECTURE.md documenting all trigger sources and their behavior
+
+### Changed
+
+- Boot-runner and resume-check now pass `--force` to orchestrator — all instance wakes (EventBridge, remote trigger, manual) bypass the active-hours guard
+- Remove redundant active-hours guard from resume-check — EventBridge already constrains its schedule to active hours
+- Lower resume-check heartbeat threshold from 80% to 20% of interval (48min → 12min for hourly) to avoid blocking remote triggers
+- `--run-agent` no longer sets `.keep-running` — wakes the instance without the lock so the orchestrator self-stops after the run
+- `--sleep` in scheduled mode checks if orchestrator is running and lets it self-stop instead of killing it mid-run
+- Default `deploy-trigger.sh` to show trigger info (like `--show`); require `--deploy` flag to create resources
+
+### Fixed
+
+- Fix Lambda Function URL returning 403 — add required `lambda:InvokeFunction` permission (AWS Oct 2025 change)
+- Fix Function URL unreachable when created on a Pending Lambda — wait for function-active before creating URL
+- Fix Lambda 500 error when instance is in `stopping` state — return 409 instead of crashing
+- Fix teardown.sh not cleaning up Lambda trigger resources — add cleanup section for Function URL, Lambda, and IAM role
+
 ## [Mar 27, 2026]
 
 ### Added

@@ -11,6 +11,7 @@
 #   ./agent-manager.sh --run-agent     Trigger an agent run (fire and forget)
 #   ./agent-manager.sh --history [N]   Show wake/sleep/run timeline (last N days, default 7)
 #   ./agent-manager.sh --log [N]       Show Nth most recent orchestrator log (default: latest)
+#   ./agent-manager.sh --trigger       Show remote trigger URL and token
 #   ./agent-manager.sh --ssh           SSH into the server
 #   ./agent-manager.sh --ssh-mcp       SSH with MCP port forwarding (for auth)
 #   ./agent-manager.sh --help          Show this help
@@ -266,7 +267,7 @@ PYEOF
   fi
 
   echo ""
-  echo -e "  ${DIM}Commands: --wakeup, --sleep, --run-agent, --log, --history, --scheduled, --ssh${NC}"
+  echo -e "  ${DIM}Commands: --wakeup, --sleep, --run-agent, --trigger, --log, --history, --scheduled, --ssh${NC}"
   echo ""
 }
 
@@ -340,6 +341,20 @@ cmd_sleep() {
   elif [[ "${state}" != "running" ]]; then
     err "Instance is in state '${state}' — can only stop a running instance."
     return 1
+  fi
+
+  # In scheduled mode, check if orchestrator is running — it will self-stop when done.
+  if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" ]]; then
+    local lock_held
+    lock_held=$(ssh -o ConnectTimeout=5 "${SSH_HOST}" \
+      "flock -n ~/.agent-orchestrator.lock true 2>/dev/null && echo free || echo held" 2>/dev/null || echo "unknown")
+    if [[ "${lock_held}" == "held" ]]; then
+      # Remove keep-running so it self-stops after the run
+      ssh -o ConnectTimeout=5 "${SSH_HOST}" 'rm -f ~/agents/.keep-running' 2>/dev/null || true
+      log "Orchestrator is running. It will self-stop when done."
+      echo -e "  Monitor: ${CYAN}ssh ${SSH_HOST} 'tail -f ~/logs/orchestrator-*.log'${NC}"
+      return 0
+    fi
   fi
 
   # Remove keep-running lock before stopping
@@ -456,7 +471,7 @@ cmd_scheduled() {
     echo -e "  ${CYAN}EventBridge:${NC} wakes instance every ${interval} min during hours ${hours}"
     echo -e "  ${CYAN}Server cron:${NC} runs orchestrator every ${interval} min during hours ${hours}"
   fi
-  echo -e "  ${CYAN}Active guard:${NC} self-stops immediately if woken outside active hours"
+  echo -e "  ${CYAN}Active guard:${NC} cron runs only during active hours; boot/trigger/run-agent bypass"
   echo ""
 }
 
@@ -464,26 +479,49 @@ cmd_run_agent() {
   local state
   state=$(get_instance_state)
 
-  # Wake up if needed
+  # Wake up if needed — but don't set .keep-running (we want the instance to
+  # self-stop after the run completes)
   if [[ "${state}" != "running" ]]; then
-    cmd_wakeup
+    log "Waking instance for agent run..."
+    if [[ "${state}" == "stopping" ]]; then
+      warn "Instance is still stopping. Waiting..."
+      aws ec2 wait instance-stopped --instance-ids "${INSTANCE_ID}" --region "${REGION}"
+    fi
+    aws ec2 start-instances --instance-ids "${INSTANCE_ID}" --region "${REGION}" >/dev/null
+    log "Waiting for instance to be running..."
+    aws ec2 wait instance-running --instance-ids "${INSTANCE_ID}" --region "${REGION}"
+    log "Waiting for SSH..."
+    for i in $(seq 1 30); do
+      if ssh -o ConnectTimeout=5 "${SSH_HOST}" "echo ready" 2>/dev/null; then
+        break
+      fi
+      if [[ $i -eq 30 ]]; then
+        warn "SSH not available after 150 seconds."
+        return 1
+      fi
+      sleep 5
+    done
   fi
 
-  # Check if orchestrator is already running (test via its flock)
+  # Check if orchestrator is already running (boot/resume may have started it)
   local lock_held
   lock_held=$(ssh -o ConnectTimeout=5 "${SSH_HOST}" \
     "flock -n ~/.agent-orchestrator.lock true 2>/dev/null && echo free || echo held" || echo "free")
   if [[ "${lock_held}" == "held" ]]; then
-    warn "Orchestrator is already running."
+    log "Orchestrator is already running (triggered on wake)."
+    if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" ]]; then
+      echo -e "  It will self-stop (hibernate) after completing tasks."
+    fi
     echo -e "  Monitor: ${CYAN}ssh ${SSH_HOST} 'tail -f ~/logs/orchestrator-*.log'${NC}"
     return 0
   fi
 
-  # Trigger orchestrator in background
+  # Trigger orchestrator in background (--force bypasses active-hours guard
+  # since this is an explicit manual action; instance still self-stops after)
   log "Starting agent orchestrator..."
   local pid
   pid=$(ssh -o ConnectTimeout=5 "${SSH_HOST}" \
-    "nohup ~/scripts/agent-orchestrator.sh </dev/null >> ~/logs/cron-orchestrator.log 2>&1 & echo \$!" 2>/dev/null)
+    "nohup ~/scripts/agent-orchestrator.sh --force </dev/null >> ~/logs/cron-orchestrator.log 2>&1 & echo \$!" 2>/dev/null)
 
   # Brief wait, then confirm via lock
   sleep 2
@@ -620,6 +658,7 @@ with open(ct_file) as f:
     ct_data = json.load(f)
 
 scheduled_starts = []  # EventBridge-triggered (= agent ran)
+trigger_starts = []    # Remote trigger (Lambda) (= agent ran)
 manual_starts = []     # Manual wakeups (= awake but no agent run)
 stops = []
 
@@ -643,27 +682,31 @@ for ev in ct_data.get("Events", []):
     if dt is None:
         continue
     if name == "StartInstances":
-        # Distinguish scheduler-triggered starts from manual wakeups.
-        # EventBridge starts have "AmazonEventBridgeScheduler" in userAgent.
+        # Distinguish scheduler-triggered, remote-triggered, and manual starts.
         ce = json.loads(ev.get("CloudTrailEvent", "{}"))
         ua = ce.get("userAgent", "")
+        arn = ce.get("userIdentity", {}).get("arn", "")
         if "EventBridge" in ua or "Scheduler" in ua:
             scheduled_starts.append(dt)
+        elif "agent-server-trigger-role" in arn:
+            trigger_starts.append(dt)
         else:
             manual_starts.append(dt)
     elif name == "StopInstances":
         stops.append(dt)
 
 scheduled_starts.sort()
+trigger_starts.sort()
 manual_starts.sort()
 stops.sort()
-all_starts = sorted(scheduled_starts + manual_starts)
+all_starts = sorted(scheduled_starts + trigger_starts + manual_starts)
 
 # Filter to only the requested date range (local time)
 from datetime import timedelta
 now_local = datetime.now(local_tz)
 date_start = (now_local - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0)
 scheduled_starts = [s for s in scheduled_starts if s >= date_start]
+trigger_starts = [s for s in trigger_starts if s >= date_start]
 manual_starts = [s for s in manual_starts if s >= date_start]
 all_starts = [s for s in all_starts if s >= date_start]
 stops = [s for s in stops if s >= date_start]
@@ -676,6 +719,8 @@ with open(run_file, "w") as rf:
     rf.write("SOURCE:cloudtrail\n")
     for s in scheduled_starts:
         rf.write(s.strftime("%Y%m%d-%H%M%S") + "\n")
+    for s in trigger_starts:
+        rf.write(s.strftime("%Y%m%d-%H%M%S") + "\n")
     for s in manual_starts:
         rf.write("AWAKE:" + s.strftime("%Y%m%d-%H%M%S") + "\n")
 
@@ -684,11 +729,14 @@ if days == 1:
     today_str = now_local.strftime("%Y-%m-%d")
     today_starts = [s for s in all_starts if s.strftime("%Y-%m-%d") == today_str]
     is_scheduled = set(s.strftime("%Y%m%d-%H%M%S") for s in scheduled_starts)
+    is_trigger = set(s.strftime("%Y%m%d-%H%M%S") for s in trigger_starts)
     with open(events_file, "w") as ef:
         for s in today_starts:
             ts_str = s.strftime('%Y%m%d-%H%M%S')
             if ts_str in is_scheduled:
                 ef.write(f"START:{ts_str}\n")
+            elif ts_str in is_trigger:
+                ef.write(f"TRIGGER:{ts_str}\n")
             else:
                 ef.write(f"WAKEUP:{ts_str}\n")
             # Find the closest stop after this start
@@ -841,8 +889,9 @@ if days == 1 and events_file:
 
         for line in raw.split("\n"):
             line = line.strip()
-            if line.startswith("START:") or line.startswith("WAKEUP:"):
+            if line.startswith("START:") or line.startswith("WAKEUP:") or line.startswith("TRIGGER:"):
                 is_manual = line.startswith("WAKEUP:")
+                is_trigger = line.startswith("TRIGGER:")
                 ts_str = line.split(":", 1)[1]
                 try:
                     dt = datetime.strptime(ts_str[:15], "%Y%m%d-%H%M%S")
@@ -854,6 +903,8 @@ if days == 1 and events_file:
                     end_hm = None
                     if is_manual:
                         events.append((hm, "○", "manual wakeup (no agent run)"))
+                    elif is_trigger:
+                        events.append((hm, "▶", "remote trigger → orchestrator started"))
                     else:
                         events.append((hm, "▶", "orchestrator started"))
                 except ValueError:
@@ -939,6 +990,45 @@ cmd_log() {
   echo "${log_output}"
 }
 
+cmd_trigger() {
+  local trigger_url trigger_token
+  trigger_url="$(json_get trigger_function_url)"
+  trigger_token="$(json_get trigger_token)"
+
+  if [[ -z "${trigger_url}" ]]; then
+    echo ""
+    echo "No remote trigger deployed."
+    echo ""
+    echo "  To set one up, run:"
+    echo "    ./deploy-trigger.sh --deploy"
+    echo ""
+    return
+  fi
+
+  echo ""
+  echo "============================================================"
+  echo " REMOTE TRIGGER"
+  echo "============================================================"
+  echo ""
+  echo "  Function URL:"
+  echo "    ${trigger_url}"
+  echo ""
+  echo "  Bearer Token:"
+  echo "    ${trigger_token}"
+  echo ""
+  echo "  Test:"
+  echo "    curl -s -X POST '${trigger_url}' \\"
+  echo "      -H 'Authorization: Bearer ${trigger_token}' | python3 -m json.tool"
+  echo ""
+  echo "  iOS Shortcuts:"
+  echo "    Action:  Get Contents of URL"
+  echo "    URL:     ${trigger_url}"
+  echo "    Method:  POST"
+  echo "    Headers: Authorization = Bearer ${trigger_token}"
+  echo ""
+  echo "============================================================"
+}
+
 cmd_help() {
   echo ""
   echo -e "${BOLD}agent-manager${NC} — Manage your agent server"
@@ -956,6 +1046,7 @@ cmd_help() {
   echo -e "  ${CYAN}./agent-manager.sh --history 14${NC} Timeline for the last 14 days"
   echo -e "  ${CYAN}./agent-manager.sh --log${NC}       Show latest orchestrator log"
   echo -e "  ${CYAN}./agent-manager.sh --log 3${NC}     Show 3rd most recent log"
+  echo -e "  ${CYAN}./agent-manager.sh --trigger${NC}     Show remote trigger URL and token"
   echo -e "  ${CYAN}./agent-manager.sh --ssh${NC}        SSH into the server"
   echo -e "  ${CYAN}./agent-manager.sh --ssh-mcp${NC}    SSH with MCP port forwarding (for auth)"
   echo -e "  ${CYAN}./agent-manager.sh --help${NC}       Show this help"
@@ -974,6 +1065,7 @@ case "${1:---status}" in
   --run-agent|run-agent)     cmd_run_agent ;;
   --history|history)         cmd_history "${2:-7}" ;;
   --log|log)                 cmd_log "${2:-1}" ;;
+  --trigger|trigger)   cmd_trigger ;;
   --ssh|ssh)           cmd_ssh ;;
   --ssh-mcp|ssh-mcp)   cmd_ssh_mcp ;;
   --help|-h|help)      cmd_help ;;

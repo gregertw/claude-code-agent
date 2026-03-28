@@ -2,8 +2,12 @@
 # =============================================================================
 # Agent Resume Check — run orchestrator on resume from hibernation
 # =============================================================================
-# Only runs if the last run was more than SCHEDULE_INTERVAL ago and we're
-# within active hours.
+# Runs the orchestrator if the last run was more than SCHEDULE_INTERVAL ago.
+#
+# No active-hours guard here — EventBridge already constrains its schedule to
+# active hours, so any wake outside those hours is intentional (remote trigger,
+# --wakeup, --run-agent). The orchestrator is called with --force to bypass its
+# own hours guard for the same reason.
 # =============================================================================
 
 set -uo pipefail
@@ -13,29 +17,11 @@ source "${HOME_DIR}/.agent-server.conf" 2>/dev/null || true
 source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
 SCRIPTS_DIR="${HOME_DIR}/scripts"
 
-# Source shared functions
-if [[ -f "${SCRIPTS_DIR}/agent-functions.sh" ]]; then
-  source "${SCRIPTS_DIR}/agent-functions.sh"
-fi
-
-# Keep-running lock bypasses active-hours guard
-if [[ -f "${HOME_DIR}/agents/.keep-running" ]]; then
-  echo "Resume check: keep-running lock found. Bypassing active-hours guard."
-else
-  # Active-hours guard
-  if ! check_active_hours "${SCHEDULE_HOURS:-6-22}" "${SCHEDULE_WEEKEND_HOURS:-}"; then
-    echo "Resume check: outside active hours (${SCHEDULE_HOURS:-6-22}, weekend: ${SCHEDULE_WEEKEND_HOURS:-same}). Stopping."
-    do_hibernate "Outside active hours (resume)"
-    exit 0
-  fi
-fi
-
-# Heartbeat interval check — use 80% of interval to account for boot time
-# and the fact that the heartbeat records completion time, not start time.
-# E.g. 60min interval → threshold 48min, so a run completing at :01 won't
-# block the next wake at :00 of the following hour.
+# Heartbeat interval check — skip if last run was within 20% of interval.
+# E.g. 60min interval → threshold 12min. Prevents duplicate runs from rapid
+# re-triggers while still allowing remote triggers shortly after a run.
 INTERVAL_SEC=$(( ${SCHEDULE_INTERVAL:-60} * 60 ))
-THRESHOLD_SEC=$(( INTERVAL_SEC * 80 / 100 ))
+THRESHOLD_SEC=$(( INTERVAL_SEC * 20 / 100 ))
 OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
 HEARTBEAT="${HOME_DIR}/brain/${OUTPUT_FOLDER}/.agent-heartbeat"
 
@@ -47,6 +33,9 @@ if [[ -f "${HEARTBEAT}" ]]; then
     AGE=$(( NOW_EPOCH - LAST_EPOCH ))
     if [[ ${AGE} -lt ${THRESHOLD_SEC} ]]; then
       echo "Resume check: last run was ${AGE}s ago (< ${THRESHOLD_SEC}s threshold). Skipping."
+      # Don't hibernate here — the instance may have been woken by --wakeup
+      # (which sets .keep-running after SSH is ready, i.e. after this script runs).
+      # The next cron run or --sleep will handle cleanup.
       exit 0
     fi
     echo "Resume check: last run was ${AGE}s ago (>= ${THRESHOLD_SEC}s threshold). Running orchestrator."
@@ -54,4 +43,4 @@ if [[ -f "${HEARTBEAT}" ]]; then
 else
   echo "Resume check: no heartbeat file found. Running orchestrator."
 fi
-exec "${SCRIPTS_DIR}/agent-orchestrator.sh"
+exec "${SCRIPTS_DIR}/agent-orchestrator.sh" --force

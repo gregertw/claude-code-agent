@@ -318,8 +318,9 @@ manually (e.g., to SSH in, run a task, or debug):
 Or use the AWS Console: EC2 → Instances → select `agent-server` → Instance
 state → Start instance.
 
-The instance will run the boot runner (agent-orchestrator.sh) automatically on
-start. To prevent it from self-stopping while you're working:
+The instance will run the orchestrator automatically on start (bypassing the
+active-hours guard, since any manual start is intentional). To prevent it from
+self-stopping while you're working:
 
 ```bash
 touch ~/agents/.keep-running      # prevents self-stop
@@ -335,6 +336,41 @@ alive, use the `agent` CLI:
 agent run                         # runs the full orchestrator
 agent run "Your custom prompt"    # runs a one-off task
 ```
+
+### Optional: Remote Trigger
+
+You can set up a Lambda Function URL to trigger agent runs from any device
+(phone, tablet, iOS Shortcuts). This starts the instance, which runs the
+orchestrator and then self-stops — works at any time, even outside active hours.
+
+```bash
+# Deploy the trigger (creates Lambda + Function URL + Bearer token):
+./deploy-trigger.sh --deploy
+
+# View your URL and token (for setting up iOS Shortcuts, etc.):
+./deploy-trigger.sh              # or: ./agent-manager.sh --trigger
+
+# Remove the trigger:
+./deploy-trigger.sh --remove
+```
+
+**iOS Shortcuts setup:**
+
+1. Open the **Shortcuts** app → tap **+** to create a new shortcut
+2. Tap **Add Action** → search for **Get Contents of URL**
+3. Tap the URL field and paste your **Function URL** (from `--trigger` output)
+4. Tap **Method** → change to **POST**
+5. Tap **Headers** → **Add New Header**:
+   - Key: `Authorization`
+   - Value: `Bearer <your token>` (paste the full Bearer token from `--trigger` output)
+6. Optional: rename the shortcut (e.g. "Run Agent") and add it to your Home Screen
+
+The shortcut can also be triggered via Siri ("Hey Siri, Run Agent") or from
+the share sheet.
+
+> **Note:** `./teardown.sh` automatically cleans up trigger resources if deployed.
+> This feature is for scheduled mode only — in always-on mode the instance is
+> already running and `StartInstances` is a harmless no-op.
 
 ---
 

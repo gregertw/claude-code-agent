@@ -27,6 +27,7 @@ claude-code-agent/
 │   ├── hooks/                  #   Claude Code hook scripts
 │   │   └── protect-settings.sh #     Blocks Edit/Write to settings and .env
 │   ├── settings.local.json     #   Project-level Claude settings (hooks config)
+│   ├── trigger-lambda.py       #   Lambda code for remote trigger
 │   └── obsidian/               #   Obsidian document templates
 │       ├── ai instruction.md   #     Template for new AI instruction files
 │       ├── daily note.md       #     Template for daily notes
@@ -42,6 +43,7 @@ claude-code-agent/
 ├── deploy.sh                   # One-command AWS deploy (creates all infra)
 ├── teardown.sh                 # One-command AWS teardown
 ├── deploy-scheduler.sh         # EventBridge scheduler create/remove
+├── deploy-trigger.sh           # Optional: Lambda remote trigger
 ├── setup.sh                    # Server bootstrap (packages, firewall, security)
 ├── agent-setup.sh              # Post-deploy setup (brain dir, MCP registration)
 ├── agent-orchestrator.sh       # Main runtime — builds prompt, runs Claude Code
@@ -57,6 +59,7 @@ claude-code-agent/
 | `deploy.sh` | Local machine | Creates EC2 instance, security group, IAM role, Elastic IP, EventBridge scheduler. Uploads repo and runs `setup.sh` on the server. Saves state to `deploy-state.json`. |
 | `teardown.sh` | Local machine | Destroys all AWS resources listed in `deploy-state.json`. |
 | `deploy-scheduler.sh` | Local machine | Creates or removes the EventBridge scheduler rule (used by `agent-manager.sh`). |
+| `deploy-trigger.sh` | Local machine | Optional. Creates Lambda Function URL for remote agent triggering. Standalone — not called by `deploy.sh`. |
 | `agent-manager.sh` | Local machine | Day-to-day management: show status, wakeup/sleep instance, switch schedule mode, SSH with port forwarding. |
 | `setup.sh` | EC2 server | System-level bootstrap: installs packages, configures UFW firewall, fail2ban, unattended-upgrades, optional ttyd web terminal. |
 | `agent-setup.sh` | EC2 server | Creates brain directory from templates, verifies Claude Code auth, registers MCP servers. Safe to re-run. |
@@ -222,16 +225,19 @@ Local machine                              AWS
 | Elastic IP | Static IP for consistent SSH/web access |
 | IAM role | `agent-server-role` — allows the instance to stop itself |
 | EventBridge scheduler | (Scheduled mode only) Wakes the instance every N minutes |
+| Lambda Function URL | (Optional) Remote trigger — starts the instance via Bearer-token-authenticated HTTPS endpoint |
 | Key pair | SSH key, `.pem` stored locally in `~/.ssh/` |
 
 ### Runtime: how the agent executes
 
 ```
-EventBridge wakes instance (scheduled mode)
+EventBridge / remote trigger wakes instance (scheduled mode)
   or instance is already running (always-on mode)
          │
          ▼
-  agent-orchestrator.sh (runs at boot via systemd or cron)
+  agent-orchestrator.sh
+    Boot/resume: systemd runs with --force (bypasses active-hours guard)
+    Cron: runs without flags (active-hours guard applies)
          │
          ├─ Load ~/.agent-server.conf and ~/.agent-env
          ├─ Network connectivity check (30 attempts, 2s intervals)
@@ -280,6 +286,38 @@ server to `localhost` so OAuth redirects work during initial authentication.
 | Scheduled 2-hourly | Wake, run tasks (~10 min), stop | ~$11/month |
 
 Switch with `./agent-manager.sh --always-on` or `./agent-manager.sh --scheduled [minutes]`.
+
+### Wake/run behavior by trigger source
+
+How the orchestrator behaves depends on **what started it** and **which mode** the server is in.
+
+**Scheduled mode:**
+
+| Trigger | Entry path | Hours guard | Runs agent? | Self-stops? |
+|---|---|---|---|---|
+| EventBridge (scheduled wake) | resume-hook → resume-check → orchestrator `--force` | Bypassed | Yes, if heartbeat interval elapsed | Yes (hibernate) |
+| Remote trigger (Lambda) | Lambda → StartInstances → same as above | Bypassed | Yes, if heartbeat interval elapsed | Yes (hibernate) |
+| `--run-agent` | StartInstances → boot/resume runs orchestrator `--force`; or SSH → orchestrator `--force` if already running | Bypassed | Yes | Yes (hibernate) |
+| `--wakeup` | StartInstances → resume path runs + `.keep-running` set | Bypassed | Yes (side effect of wake) | No (`.keep-running`) |
+| Cron (instance already running) | cron → orchestrator (no flag) | **Active** | Only during active hours | Yes (hibernate) |
+| Cold boot (rare) | boot-runner → orchestrator `--force` | Bypassed | Yes | Yes (hibernate) |
+
+**Always-on mode:**
+
+| Trigger | Entry path | Hours guard | Runs agent? | Self-stops? |
+|---|---|---|---|---|
+| Cron | cron → orchestrator (no flag) | Skipped (mode=always-on) | Yes (cron only fires during active hours) | No |
+| Manual (`agent run`) | CLI → orchestrator | Skipped (mode=always-on) | Yes | No |
+
+**Safeguards:**
+
+| Safeguard | Where | Purpose |
+|---|---|---|
+| `flock` | Orchestrator | Prevents concurrent runs — cron or resume silently exits if orchestrator is already running |
+| Heartbeat interval check | `agent-resume-check.sh` | Prevents duplicate runs if woken too soon after last run (20% of interval = 12min for hourly). If skipped, instance hibernates. |
+| Hours guard in orchestrator | `agent-orchestrator.sh` | Last-resort safety net for cron runs outside active hours; bypassed by `--force` and `.keep-running` |
+| `.keep-running` file | Orchestrator + resume-check | Created by `--wakeup`; bypasses hours guard and prevents self-stop for interactive sessions |
+| 10-second hibernate grace | Orchestrator (end) | Allows `touch .keep-running` to cancel self-stop just before hibernate |
 
 ### Security
 

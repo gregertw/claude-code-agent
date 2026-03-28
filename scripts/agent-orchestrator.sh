@@ -11,7 +11,8 @@
 #
 # Usage:
 #   ~/scripts/agent-orchestrator.sh              # full run
-#   ~/scripts/agent-orchestrator.sh --no-stop    # skip self-stop (for testing)
+#   ~/scripts/agent-orchestrator.sh --force      # bypass active-hours guard (still self-stops)
+#   ~/scripts/agent-orchestrator.sh --no-stop    # skip self-stop AND hours guard (for testing)
 #
 # The actual task logic (reading default-tasks, inbox, ActingWeb) lives in
 # the Claude prompt — not in bash. This script just bootstraps the environment
@@ -26,7 +27,13 @@ SCRIPTS_DIR="${HOME_DIR}/scripts"
 ORCH_LOG_DIR="${HOME_DIR}/logs"
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 ORCHESTRATOR_LOG="${ORCH_LOG_DIR}/orchestrator-${TIMESTAMP}.log"
-NO_STOP="${1:-}"
+ARG="${1:-}"
+NO_STOP=""
+FORCE_RUN=""
+case "${ARG}" in
+  --no-stop) NO_STOP="true" ; FORCE_RUN="true" ;;
+  --force)   FORCE_RUN="true" ;;
+esac
 LOCK_FILE="${HOME_DIR}/.agent-orchestrator.lock"
 
 # --- Source shared functions --------------------------------------------------
@@ -72,14 +79,15 @@ source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
 # --- Keep-running lock (checked early so manual wakeups bypass hours guard) ---
 if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && -f "${HOME_DIR}/agents/.keep-running" ]]; then
   echo "Lock file found (~/.keep-running). Bypassing active-hours guard and self-stop."
-  NO_STOP="--no-stop"
+  NO_STOP="true"
+  FORCE_RUN="true"
 fi
 
 # --- Active-hours guard (scheduled mode only) --------------------------------
-# If running in scheduled mode outside active hours, skip the run and self-stop.
-# This prevents the server from staying awake if woken by a stale schedule,
-# manual start, or hibernation resume outside active hours.
-if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && "${NO_STOP}" != "--no-stop" ]]; then
+# Safety net for cron-initiated runs outside active hours. Boot-runner and
+# resume-check pass --force (which sets FORCE_RUN), so this only applies to
+# cron runs on an already-running instance.
+if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && -z "${FORCE_RUN}" ]]; then
   if ! check_active_hours "${SCHEDULE_HOURS:-6-22}" "${SCHEDULE_WEEKEND_HOURS:-}"; then
     echo "Outside active hours (${SCHEDULE_HOURS:-6-22}, weekend: ${SCHEDULE_WEEKEND_HOURS:-same}, current: $(date +%-H)). Skipping run."
     do_hibernate "Outside active hours"
@@ -346,7 +354,7 @@ if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" ]]; then
 fi
 
 # --- 10. Self-stop (scheduled mode) ----------------------------------------
-if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && "${NO_STOP}" != "--no-stop" ]]; then
+if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && -z "${NO_STOP}" ]]; then
   echo "Scheduled mode: hibernating instance in 10 seconds..."
   echo "(Cancel with: touch ~/agents/.keep-running)"
   sleep 10

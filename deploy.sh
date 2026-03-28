@@ -351,8 +351,8 @@ log "Files uploaded."
 # Set server timezone to match local machine
 LOCAL_TZ=$(readlink /etc/localtime 2>/dev/null | sed 's|.*/zoneinfo/||')
 if [[ -n "${LOCAL_TZ}" ]]; then
-  ssh "${SSH_HOST}" "sudo timedatectl set-timezone '${LOCAL_TZ}'"
-  log "Timezone set to ${LOCAL_TZ}"
+  ssh "${SSH_HOST}" "sudo timedatectl set-timezone '${LOCAL_TZ}' && sudo systemctl restart cron"
+  log "Timezone set to ${LOCAL_TZ} (cron restarted)"
   # Store timezone in deploy-state.json for scheduler alignment
   python3 -c "
 import json

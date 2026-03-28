@@ -79,6 +79,8 @@ echo "  Region:             ${REGION}"
 [[ -n "${SECURITY_GROUP_ID}" ]] && echo "  Security Group:     ${SECURITY_GROUP_ID}"
 [[ -n "${KEY_PAIR_NAME}" ]]    && echo "  Key Pair:           ${KEY_PAIR_NAME} + ~/.ssh/${KEY_PAIR_NAME}.pem"
 [[ -n "${SSH_CONFIG_HOST}" ]]  && echo "  SSH Config Host:    ${SSH_CONFIG_HOST} (in ~/.ssh/config)"
+TRIGGER_FUNCTION="$(json_get trigger_function_name)"
+[[ -n "${TRIGGER_FUNCTION}" ]] && echo "  Lambda Trigger:     ${TRIGGER_FUNCTION}"
 echo "  EventBridge:        agent-server-start scheduler"
 echo "  IAM Roles:          agent-server-scheduler-role, agent-server-role"
 echo "  IAM Profile:        agent-server-profile"
@@ -122,6 +124,27 @@ else
   aws_ignore_missing aws scheduler delete-schedule \
     --name "agent-server-start" \
     --region "${REGION}"
+fi
+
+# --- 1b. Remove Lambda Trigger -----------------------------------------------
+TRIGGER_FUNCTION="$(json_get trigger_function_name)"
+TRIGGER_ROLE="$(json_get trigger_role_name)"
+if [[ -n "${TRIGGER_FUNCTION}" ]]; then
+  log "Removing Lambda trigger function..."
+  aws_ignore_missing aws lambda delete-function-url-config \
+    --function-name "${TRIGGER_FUNCTION}" --region "${REGION}"
+  aws_ignore_missing aws lambda delete-function \
+    --function-name "${TRIGGER_FUNCTION}" --region "${REGION}"
+fi
+if [[ -n "${TRIGGER_ROLE}" ]]; then
+  log "Removing Lambda trigger IAM role..."
+  aws_ignore_missing aws iam detach-role-policy \
+    --role-name "${TRIGGER_ROLE}" \
+    --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+  aws_ignore_missing aws iam delete-role-policy \
+    --role-name "${TRIGGER_ROLE}" --policy-name "ec2-trigger"
+  aws_ignore_missing aws iam delete-role \
+    --role-name "${TRIGGER_ROLE}"
 fi
 
 # --- 2. Delete IAM role policy and role --------------------------------------

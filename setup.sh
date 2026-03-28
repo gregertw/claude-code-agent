@@ -470,7 +470,7 @@ Wants=network-online.target
 Type=oneshot
 User=${UBUNTU_USER}
 Group=${UBUNTU_USER}
-ExecStart=${HOME_DIR}/scripts/agent-orchestrator.sh
+ExecStart=${HOME_DIR}/scripts/agent-orchestrator.sh --force
 Environment=HOME=${HOME_DIR}
 TimeoutStartSec=900
 RemainAfterExit=no
