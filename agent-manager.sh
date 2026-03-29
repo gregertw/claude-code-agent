@@ -75,6 +75,12 @@ load_state() {
   OWNER=$(python3 -c "import json; print(json.load(open('${STATE_FILE}'))['owner'])")
 }
 
+# --- JSON helpers for deploy-state.json --------------------------------------
+json_get() {
+  python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print(d.get(sys.argv[2],''))" \
+    "${STATE_FILE}" "$1"
+}
+
 # --- Get instance state ------------------------------------------------------
 get_instance_state() {
   aws ec2 describe-instances \
