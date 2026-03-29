@@ -624,28 +624,33 @@ cmd_history() {
     fi
   fi
 
-  # Fallback: use CloudTrail Start/Stop events to infer runs when SSH unavailable.
-  # A StartInstances→StopInstances pair within a short window = one agent run.
+  # CloudTrail Start/Stop events — always fetched.
+  # When SSH data is available, CloudTrail supplements the events view with
+  # trigger/wakeup events that didn't produce orchestrator logs.
+  # When SSH is unavailable, CloudTrail is the sole data source.
   local ct_file
   ct_file=$(mktemp)
-  if [[ "${got_ssh_data}" != "true" ]]; then
-    # Fetch StartInstances and StopInstances events from CloudTrail
-    aws cloudtrail lookup-events \
-      --lookup-attributes "AttributeKey=ResourceName,AttributeValue=${INSTANCE_ID}" \
-      --start-time "${start_time}" \
-      --end-time "${end_time}" \
-      --max-results 200 \
-      --region "${REGION}" \
-      --output json > "${ct_file}" 2>/dev/null || echo '{"Events":[]}' > "${ct_file}"
+  aws cloudtrail lookup-events \
+    --lookup-attributes "AttributeKey=ResourceName,AttributeValue=${INSTANCE_ID}" \
+    --start-time "${start_time}" \
+    --end-time "${end_time}" \
+    --max-results 200 \
+    --region "${REGION}" \
+    --output json > "${ct_file}" 2>/dev/null || echo '{"Events":[]}' > "${ct_file}"
 
-    # Convert CloudTrail events into run timestamps and event details.
-    # Timestamps are converted to the server's local timezone so the rendering
-    # code (which treats them as naive local times) displays correct hours.
-    python3 - "${ct_file}" "${run_file}" "${events_file}" "${days}" "${tz_name}" << 'CT_PYEOF'
+  # Convert CloudTrail events into run timestamps and event details.
+  # Timestamps are converted to the server's local timezone so the rendering
+  # code (which treats them as naive local times) displays correct hours.
+  #
+  # Mode: "supplement" — SSH logs are primary; only add non-overlapping events.
+  #        "primary"   — no SSH data; CloudTrail is the sole source.
+  local ct_mode="primary"
+  [[ "${got_ssh_data}" == "true" ]] && ct_mode="supplement"
+  python3 - "${ct_file}" "${run_file}" "${events_file}" "${days}" "${tz_name}" "${ct_mode}" << 'CT_PYEOF'
 import json, sys
 from datetime import datetime, timezone
 
-ct_file, run_file, events_file, days_str, tz_name = sys.argv[1:6]
+ct_file, run_file, events_file, days_str, tz_name, ct_mode = sys.argv[1:7]
 days = int(days_str)
 
 try:
@@ -711,45 +716,85 @@ manual_starts = [s for s in manual_starts if s >= date_start]
 all_starts = [s for s in all_starts if s >= date_start]
 stops = [s for s in stops if s >= date_start]
 
-# Write scheduled run timestamps (matching orchestrator log filename format).
-# Manual wakeups are written with an "AWAKE:" prefix so the rendering code
-# can add them to the awake set instead of the runs set.
-# First line "SOURCE:cloudtrail" signals estimated data.
-with open(run_file, "w") as rf:
-    rf.write("SOURCE:cloudtrail\n")
-    for s in scheduled_starts:
-        rf.write(s.strftime("%Y%m%d-%H%M%S") + "\n")
-    for s in trigger_starts:
-        rf.write(s.strftime("%Y%m%d-%H%M%S") + "\n")
-    for s in manual_starts:
-        rf.write("AWAKE:" + s.strftime("%Y%m%d-%H%M%S") + "\n")
+if ct_mode == "primary":
+    # No SSH data — CloudTrail is the sole source for run timestamps.
+    # First line "SOURCE:cloudtrail" signals estimated data.
+    with open(run_file, "w") as rf:
+        rf.write("SOURCE:cloudtrail\n")
+        for s in scheduled_starts:
+            rf.write(s.strftime("%Y%m%d-%H%M%S") + "\n")
+        for s in trigger_starts:
+            rf.write(s.strftime("%Y%m%d-%H%M%S") + "\n")
+        for s in manual_starts:
+            rf.write("AWAKE:" + s.strftime("%Y%m%d-%H%M%S") + "\n")
 
-# For single-day view, build event pairs sorted chronologically
+# For single-day view, build event pairs sorted chronologically.
+# In supplement mode, merge CloudTrail events with existing SSH-based events,
+# adding only start/stop events that don't overlap with orchestrator logs.
 if days == 1:
     today_str = now_local.strftime("%Y-%m-%d")
     today_starts = [s for s in all_starts if s.strftime("%Y-%m-%d") == today_str]
+    today_stops = [s for s in stops if s.strftime("%Y-%m-%d") == today_str]
     is_scheduled = set(s.strftime("%Y%m%d-%H%M%S") for s in scheduled_starts)
     is_trigger = set(s.strftime("%Y%m%d-%H%M%S") for s in trigger_starts)
-    with open(events_file, "w") as ef:
-        for s in today_starts:
-            ts_str = s.strftime('%Y%m%d-%H%M%S')
-            if ts_str in is_scheduled:
-                ef.write(f"START:{ts_str}\n")
-            elif ts_str in is_trigger:
-                ef.write(f"TRIGGER:{ts_str}\n")
-            else:
-                ef.write(f"WAKEUP:{ts_str}\n")
-            # Find the closest stop after this start
-            matching_stop = None
-            for st in stops:
-                if st > s:
-                    matching_stop = st
-                    break
-            if matching_stop:
-                ef.write(f"ENDTIME:{int(matching_stop.timestamp())}\n")
-                ef.write("hibernating instance\n")
+
+    if ct_mode == "supplement":
+        # Read existing SSH-based events to find which hours already have entries.
+        existing_start_hours = set()
+        try:
+            with open(events_file) as ef:
+                for line in ef:
+                    line = line.strip()
+                    if line.startswith("START:") and len(line) >= 17:
+                        # Extract hour from START:YYYYMMDD-HHMMSS
+                        existing_start_hours.add(line[15:17])
+        except (FileNotFoundError, IOError):
+            pass
+
+        # Append CloudTrail events that don't overlap with existing orchestrator runs.
+        # A start is "overlapping" if there's an orchestrator log in the same hour.
+        with open(events_file, "a") as ef:
+            for s in today_starts:
+                hour_str = s.strftime("%H")
+                if hour_str in existing_start_hours:
+                    continue  # orchestrator log already covers this start
+                ts_str = s.strftime("%Y%m%d-%H%M%S")
+                if ts_str in is_trigger:
+                    ef.write(f"TRIGGER:{ts_str}\n")
+                elif ts_str in is_scheduled:
+                    ef.write(f"START:{ts_str}\n")
+                else:
+                    ef.write(f"WAKEUP:{ts_str}\n")
+                # Find the closest stop after this start
+                matching_stop = None
+                for st in today_stops:
+                    if st > s:
+                        matching_stop = st
+                        break
+                if matching_stop:
+                    ef.write(f"ENDTIME:{int(matching_stop.timestamp())}\n")
+                    ef.write("hibernating instance\n")
+    else:
+        # Primary mode — write all events from CloudTrail
+        with open(events_file, "w") as ef:
+            for s in today_starts:
+                ts_str = s.strftime('%Y%m%d-%H%M%S')
+                if ts_str in is_scheduled:
+                    ef.write(f"START:{ts_str}\n")
+                elif ts_str in is_trigger:
+                    ef.write(f"TRIGGER:{ts_str}\n")
+                else:
+                    ef.write(f"WAKEUP:{ts_str}\n")
+                # Find the closest stop after this start
+                matching_stop = None
+                for st in stops:
+                    if st > s:
+                        matching_stop = st
+                        break
+                if matching_stop:
+                    ef.write(f"ENDTIME:{int(matching_stop.timestamp())}\n")
+                    ef.write("hibernating instance\n")
 CT_PYEOF
-  fi
   rm -f "${ct_file}"
 
   # Render timeline with python3
@@ -883,9 +928,13 @@ if days == 1 and events_file:
         raw = ""
 
     if raw:
-        events = []  # list of (HH:MM, symbol, description)
+        # Parse event blocks (START/TRIGGER/WAKEUP + ENDTIME + status lines).
+        # Each block becomes a group of events with a sort key (timestamp).
+        # We sort by sort key so that SSH-based and CloudTrail-supplemented
+        # events appear in chronological order.
+        event_groups = []  # list of (sort_key_minutes, [(HH:MM, symbol, desc), ...])
         current_start = None
-        end_hm = None  # from ENDTIME (file mtime)
+        end_hm = None
 
         for line in raw.split("\n"):
             line = line.strip()
@@ -896,17 +945,17 @@ if days == 1 and events_file:
                 try:
                     dt = datetime.strptime(ts_str[:15], "%Y%m%d-%H%M%S")
                     hm = dt.strftime("%H:%M")
-                    # If this is the first event or previous run ended, infer wake
-                    if not events or events[-1][1] == "▼":
-                        events.append((hm, "▲", "instance woke up"))
+                    sort_key = dt.hour * 60 + dt.minute
+                    group = []
                     current_start = hm
                     end_hm = None
                     if is_manual:
-                        events.append((hm, "○", "manual wakeup (no agent run)"))
+                        group.append((hm, "○", "manual wakeup (no agent run)"))
                     elif is_trigger:
-                        events.append((hm, "▶", "remote trigger → orchestrator started"))
+                        group.append((hm, "▶", "remote trigger → orchestrator started"))
                     else:
-                        events.append((hm, "▶", "orchestrator started"))
+                        group.append((hm, "▶", "orchestrator started"))
+                    event_groups.append((sort_key, group))
                 except ValueError:
                     pass
             elif line.startswith("ENDTIME:"):
@@ -920,13 +969,29 @@ if days == 1 and events_file:
                 m = re.search(r"exit code: (\d+)", line)
                 code = m.group(1) if m else "?"
                 hm = end_hm or current_start or "??:??"
-                events.append((hm, "■", f"agent finished (exit {code})"))
+                if event_groups:
+                    event_groups[-1][1].append((hm, "■", f"agent finished (exit {code})"))
             elif "hibernating instance" in line or "Falling back to shutdown" in line:
                 hm = end_hm or "??:??"
-                events.append((hm, "▼", "instance hibernated"))
+                if event_groups:
+                    event_groups[-1][1].append((hm, "▼", "instance hibernated"))
             elif "Outside active hours" in line:
                 hm = end_hm or "??:??"
-                events.append((hm, "▼", "stopped (outside active hours)"))
+                if event_groups:
+                    event_groups[-1][1].append((hm, "▼", "stopped (outside active hours)"))
+
+        # Sort groups chronologically, then infer "instance woke up" events.
+        # Wake-up is inferred when there's no previous group or the previous
+        # group ended with a stop (▼). Done after sorting so the predecessor
+        # is always the chronologically correct one.
+        event_groups.sort(key=lambda g: g[0])
+        events = []
+        for i, (_, group) in enumerate(event_groups):
+            prev_last_sym = event_groups[i-1][1][-1][1] if i > 0 else "▼"
+            if i == 0 or prev_last_sym == "▼":
+                hm = group[0][0]  # use timestamp of first event in group
+                events.append((hm, "▲", "instance woke up"))
+            events.extend(group)
 
         if events:
             print()

@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Mar 29, 2026]
+
+### Fixed
+
+- Fix resume hook failing silently after a bad orchestrator run — clear stale `agent-resume-runner` transient unit before creating a new one, preventing idle overnight instances
+- Fix `--history 1` not showing remote trigger and manual wakeup events when SSH is available — always fetch CloudTrail and merge non-overlapping start/stop events into the timeline
+- Fix `--history 1` events appearing out of order when mixing SSH and CloudTrail sources — sort event groups chronologically before inferring wake-up markers
+
 ## [Mar 28, 2026]
 
 ### Added

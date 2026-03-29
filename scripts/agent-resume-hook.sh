@@ -13,6 +13,9 @@
 
 if [ "$1" = "post" ] && { [ "$2" = "hibernate" ] || [ "$2" = "hybrid-sleep" ]; }; then
     sleep 5  # wait for network/clock sync
+    # Clear any stale failed transient unit from a previous resume cycle.
+    # systemd-run with a fixed --unit name fails if the unit already exists.
+    systemctl reset-failed agent-resume-runner.service 2>/dev/null || true
     systemd-run --no-block --uid=ubuntu --gid=ubuntu \
         --setenv=HOME=/home/ubuntu \
         --unit=agent-resume-runner \
