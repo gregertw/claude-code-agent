@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Mar 29, 2026]
 
+### Changed
+
+- Present account login and API key as equal authentication options in setup.sh, deploy.sh, and aws-setup.md
+- Improve orchestrator logging: log config summary (auth, model, MCP servers, permissions) before handing control to Claude
+- Replace blind 10s MCP warm-up sleep with active polling that reports when warm-up finishes
+- Add background watchdog that prints periodic "still running" markers during Claude execution
+- Add duration tracking to Claude run completion and agent run summary
+- Wait for initial Dropbox sync to complete in setup-dropbox.sh with progress reporting
+- Show mode-aware sync guidance (scheduled vs always-on) in setup-dropbox.sh summary
+
 ### Fixed
 
 - Fix resume hook failing silently after a bad orchestrator run — clear stale `agent-resume-runner` transient unit before creating a new one, preventing idle overnight instances

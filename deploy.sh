@@ -475,7 +475,7 @@ echo "Claude Code:  ${CLAUDE_VERSION}"
 if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then
   echo "API key:      configured"
 else
-  echo "API key:      not set (use login or set manually)"
+  echo "API key:      not set (log in on server, or set key in ~/.agent-env)"
 fi
 if [[ "${INSTALL_TTYD}" == "true" ]]; then
   echo "Web terminal: https://${ELASTIC_IP}"

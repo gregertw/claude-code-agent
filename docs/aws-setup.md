@@ -29,10 +29,16 @@ Help the user create `agent.conf` from `agent.conf.example`. Ask them for:
 
 ### B3: Run deploy.sh
 
-If the user has an API key, tell them to set it first:
-```
-export ANTHROPIC_API_KEY="sk-ant-..."
-```
+Ask the user which authentication method they want:
+
+- **Account login** (Pro/Max/Enterprise subscription) — just run `./deploy.sh`.
+  They will log into Claude Code interactively on the server during post-deploy setup.
+- **API key** (usage-based billing from console.anthropic.com) — set the key first,
+  then deploy:
+  ```
+  export ANTHROPIC_API_KEY="sk-ant-..."
+  ```
+
 Then tell them to run `./deploy.sh` and paste back the status output.
 
 The script is fully automated — it creates AWS resources, sets up the server,
@@ -91,9 +97,11 @@ MCP servers.
 cp agent.conf.example agent.conf
 nano agent.conf    # set OWNER_NAME, SCHEDULE_MODE, etc.
 
-# 2. Deploy (optionally set API key — or log in on the server later)
-export ANTHROPIC_API_KEY="sk-ant-..."   # optional
+# 2. Deploy
 ./deploy.sh
+# Auth options (choose one during post-deploy setup):
+#   - Account login: run 'claude' on the server and log in interactively
+#   - API key: export ANTHROPIC_API_KEY="sk-ant-..." before deploying
 
 # 3. Follow the post-deploy steps printed at the end
 #    (Claude Code auth, MCP auth, test run)
@@ -174,12 +182,15 @@ Connect with SSH port forwarding (required for OAuth authentication):
 # Or for manual setup: ssh -L 18850:127.0.0.1:18850 -L 18851:127.0.0.1:18851 -L 18852:127.0.0.1:18852 agent
 ```
 
-**Log into Claude Code first** (if not using an API key):
+**Authenticate Claude Code** (choose one):
 
-```bash
-claude
-# Complete theme selection + account login, then /exit
-```
+- **Account login** (Pro/Max/Enterprise): run `claude`, complete theme selection
+  and account login, then `/exit`
+- **API key**: edit `~/.agent-env` and add your key, then `source ~/.agent-env`
+  ```bash
+  nano ~/.agent-env    # set ANTHROPIC_API_KEY="sk-ant-..."
+  source ~/.agent-env
+  ```
 
 This initializes Claude Code so that `agent-setup.sh` can register MCP servers
 in the same pass.

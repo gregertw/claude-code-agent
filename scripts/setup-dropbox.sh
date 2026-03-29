@@ -302,9 +302,45 @@ if ! "${MAESTRAL_BIN}" resume 2>&1; then
   sleep 3
 fi
 
-SYNC_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null | grep -i "^Status" | awk '{$1=""; print $0}' | xargs || echo "unknown")
-ok "Maestral status: ${SYNC_STATUS}"
+# Wait for initial sync to complete — the brain folder needs to be fully
+# downloaded before the agent can run. Show progress so the user knows
+# what's happening.
+echo ""
+log "Waiting for initial sync to complete..."
+echo "  This downloads your '${BRAIN_FOLDER}/' folder from Dropbox."
+echo "  Duration depends on folder size and connection speed."
+echo ""
 
+SYNC_TIMEOUT=300
+SYNC_WAIT=0
+LAST_STATUS=""
+while [[ ${SYNC_WAIT} -lt ${SYNC_TIMEOUT} ]]; do
+  SYNC_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null | grep -i "^Status" | sed 's/^[^:]*:[[:space:]]*//' || echo "unknown")
+  if echo "${SYNC_STATUS}" | grep -qi "up to date\|idle"; then
+    break
+  fi
+  # Only print when status changes to avoid spam
+  if [[ "${SYNC_STATUS}" != "${LAST_STATUS}" ]]; then
+    echo "  Status: ${SYNC_STATUS}"
+    LAST_STATUS="${SYNC_STATUS}"
+  fi
+  sleep 5
+  SYNC_WAIT=$((SYNC_WAIT + 5))
+  # Print a dot every 30s as a heartbeat
+  if (( SYNC_WAIT % 30 == 0 )); then
+    echo "  ... still syncing (${SYNC_WAIT}s elapsed)"
+  fi
+done
+
+if [[ ${SYNC_WAIT} -ge ${SYNC_TIMEOUT} ]]; then
+  warn "Sync did not complete within ${SYNC_TIMEOUT}s."
+  echo "  Maestral is still syncing in the background."
+  echo "  Check progress with: maestral status"
+else
+  ok "Initial sync complete (${SYNC_WAIT}s)."
+fi
+
+SYNC_STATUS=$("${MAESTRAL_BIN}" status 2>/dev/null | grep -i "^Status" | sed 's/^[^:]*:[[:space:]]*//' || echo "unknown")
 echo ""
 
 # =============================================================================
@@ -354,6 +390,11 @@ echo ""
 # =============================================================================
 # Summary
 # =============================================================================
+
+# Load schedule mode to give relevant guidance
+source "${HOME}/.agent-server.conf" 2>/dev/null || true
+source "${HOME}/.agent-schedule" 2>/dev/null || true
+
 echo "════════════════════════════════════════"
 echo -e "${GREEN}Dropbox sync configured.${NC}"
 echo ""
@@ -361,9 +402,23 @@ echo "  Brain:      ~/brain → ~/Dropbox/${BRAIN_FOLDER}"
 echo "  Sync:       Only '${BRAIN_FOLDER}/' syncs (everything else excluded)"
 echo "  Status:     ${SYNC_STATUS}"
 echo ""
-echo "  Check sync: maestral status"
-echo "  View files: ls ~/brain/"
-echo "  Exclusions: maestral excluded list"
+echo -e "${BOLD}How sync works:${NC}"
+if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" ]]; then
+  echo "  You are in scheduled mode. The orchestrator handles Maestral:"
+  echo "    - Starts Maestral and waits for sync before each agent run"
+  echo "    - Waits for uploads to complete after the run"
+  echo "    - Stops Maestral before hibernating"
+  echo "  The server will not sleep until Dropbox sync is done."
+else
+  echo "  You are in always-on mode. Maestral runs continuously"
+  echo "  as a systemd service — files sync automatically."
+fi
+echo ""
+echo -e "${BOLD}Useful commands:${NC}"
+echo "  maestral status           Show sync status"
+echo "  maestral filestatus FILE  Check a specific file"
+echo "  ls ~/brain/               View synced files"
+echo "  maestral excluded list    Show excluded folders"
 echo ""
 echo "  All agent scripts continue to use ~/brain — no config changes needed."
 echo ""

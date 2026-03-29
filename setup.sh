@@ -893,10 +893,13 @@ echo "MANUAL STEPS REQUIRED:"
 echo ""
 
 STEP=1
-echo "${STEP}. SET API KEY"
-echo "   nano ~/.agent-env"
-echo "   Add your ANTHROPIC_API_KEY from console.anthropic.com"
-echo "   Then: source ~/.agent-env"
+echo "${STEP}. AUTHENTICATE CLAUDE CODE"
+echo "   Option A — Account login (Pro/Max/Enterprise subscription):"
+echo "     Run 'claude' and complete the interactive login, then /exit"
+echo "   Option B — API key (usage-based billing):"
+echo "     nano ~/.agent-env"
+echo "     Add your ANTHROPIC_API_KEY from console.anthropic.com"
+echo "     Then: source ~/.agent-env"
 echo ""
 STEP=$((STEP + 1))
 

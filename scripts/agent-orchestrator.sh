@@ -195,8 +195,17 @@ if [[ ${#MCP_SERVERS[@]} -gt 0 ]]; then
   ) &
   WARMUP_PID=$!
   disown ${WARMUP_PID}
-  echo "  Warm-up running (pid ${WARMUP_PID}), waiting 10s for connections..."
-  sleep 10
+  echo "  Warm-up running (pid ${WARMUP_PID}), waiting up to 15s..."
+  for i in $(seq 1 15); do
+    if ! kill -0 ${WARMUP_PID} 2>/dev/null; then
+      echo "  MCP warm-up finished (${i}s)."
+      break
+    fi
+    sleep 1
+  done
+  if kill -0 ${WARMUP_PID} 2>/dev/null; then
+    echo "  MCP warm-up still running — continuing anyway (it will finish in background)."
+  fi
 else
   echo "No MCP servers configured."
 fi
@@ -259,7 +268,6 @@ PROMPT_END
 echo ""
 echo "=== Handing control to Claude Code ==="
 echo "Working directory: ${BRAIN_DIR}"
-echo ""
 
 cd "${BRAIN_DIR}"
 
@@ -293,12 +301,50 @@ if [[ -n "${CLAUDE_EXTRA_FLAGS:-}" ]]; then
   CLAUDE_FLAGS+=("${_extra[@]}")
 fi
 
+# Log configuration summary
+echo "  Auth:       $(if [[ -n "${ANTHROPIC_API_KEY:-}" ]]; then echo "API key"; else echo "account login"; fi)"
+echo "  Model:      ${CLAUDE_MODEL:-default}"
+echo "  Max turns:  ${CLAUDE_MAX_TURNS:-50}"
+echo "  MCP servers: ${#MCP_SERVERS[@]} (${MCP_SERVERS[*]:-none})"
+echo "  Permissions: ${CLAUDE_PERMISSION_MODE:-settings.json}"
+echo "  Run log:    $(basename "${RUN_LOG}")"
+echo ""
+
+CLAUDE_START=$(date +%s)
+
+# Start a background watchdog that prints periodic progress markers.
+# This helps distinguish a silent-but-working Claude from a hung process.
+(
+  exec 9>&-  # Close lock fd
+  elapsed=0
+  while true; do
+    sleep 60
+    elapsed=$((elapsed + 1))
+    # Only print if Claude is still running
+    if kill -0 $$ 2>/dev/null; then
+      echo "  ... Claude still running (${elapsed}m elapsed)" >&2
+    else
+      break
+    fi
+  done
+) &
+WATCHDOG_PID=$!
+disown ${WATCHDOG_PID}
+
 # Run Claude in non-interactive mode with the master prompt
 claude "${CLAUDE_FLAGS[@]}" 2>&1 | tee "${RUN_LOG}"
 
 CLAUDE_EXIT=$?
+CLAUDE_END=$(date +%s)
+CLAUDE_DURATION=$(( CLAUDE_END - CLAUDE_START ))
+CLAUDE_MINUTES=$(( CLAUDE_DURATION / 60 ))
+CLAUDE_SECONDS=$(( CLAUDE_DURATION % 60 ))
+
+# Kill the watchdog
+kill ${WATCHDOG_PID} 2>/dev/null || true
+
 echo ""
-echo "=== Claude Code finished (exit code: ${CLAUDE_EXIT}) ==="
+echo "=== Claude Code finished (exit code: ${CLAUDE_EXIT}, duration: ${CLAUDE_MINUTES}m ${CLAUDE_SECONDS}s) ==="
 
 # --- 6. Write heartbeat file (for monitoring) ---------------------------------
 HEARTBEAT_FILE="${BRAIN_DIR}/${OUTPUT_FOLDER}/.agent-heartbeat"
@@ -327,6 +373,7 @@ echo "AGENT RUN COMPLETE"
 echo "============================================================"
 echo ""
 echo "Finished: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+echo "Duration: ${CLAUDE_MINUTES}m ${CLAUDE_SECONDS}s"
 echo "Exit code: ${CLAUDE_EXIT}"
 echo "Run log: $(basename "${RUN_LOG}")"
 echo "Mode: ${SCHEDULE_MODE:-always-on}"
