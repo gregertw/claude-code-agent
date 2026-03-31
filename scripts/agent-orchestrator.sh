@@ -90,6 +90,8 @@ fi
 if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && -z "${FORCE_RUN}" ]]; then
   if ! check_active_hours "${SCHEDULE_HOURS:-6-22}" "${SCHEDULE_WEEKEND_HOURS:-}"; then
     echo "Outside active hours (${SCHEDULE_HOURS:-6-22}, weekend: ${SCHEDULE_WEEKEND_HOURS:-same}, current: $(date +%-H)). Skipping run."
+    exec 9>&-  # Release flock before hibernation — the lock survives hibernate
+               # and would block the next orchestrator on resume.
     do_hibernate "Outside active hours"
     exit 0
   fi
@@ -409,6 +411,8 @@ if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && -z "${NO_STOP}" ]]; then
   if [[ -f "${HOME_DIR}/agents/.keep-running" ]]; then
     echo "Lock file appeared. Cancelling hibernate."
   else
+    exec 9>&-  # Release flock before hibernation — the lock survives hibernate
+               # and would block the next orchestrator on resume.
     do_hibernate "Scheduled mode self-stop"
   fi
 else

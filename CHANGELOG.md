@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Mar 31, 2026]
+
+### Fixed
+
+- Release orchestrator flock before hibernation — the kernel-level lock survives hibernate and blocked the next orchestrator on resume, causing every other scheduled run to be skipped
+
 ## [Mar 29, 2026]
 
 ### Changed
