@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Apr 1, 2026]
+
+### Added
+
+- Add `scripts/agentmail.py` CLI wrapper for Agentmail API — replaces raw curl commands with a Python script that loads credentials internally, keeping API keys out of agent tool output and run logs
+
+### Changed
+
+- Rewrite agentmail capability to use the Python CLI wrapper instead of curl — eliminates sandbox variable expansion failures, cross-platform path issues, and credential exposure in logs
+- Remove manual setup script (`agentmail-setup.sh`) and task type addition to `tasks.md` from agentmail install — capability is now fully standalone
+
 ## [Mar 31, 2026]
 
 ### Fixed
