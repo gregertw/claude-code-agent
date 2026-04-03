@@ -4,6 +4,17 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Apr 3, 2026]
+
+### Added
+
+- Auto-detect and update security group SSH rule when local IP changes during `--wakeup` — residential ISPs assign dynamic IPs that can change on router reboot or DHCP lease expiry, silently breaking SSH access
+
+### Fixed
+
+- Remove `sudo shutdown -h now` fallback from `do_hibernate()` and add 10-second timeout to the AWS CLI call — on resume from hibernation, the old orchestrator process re-entered `do_hibernate` with a stale TCP connection, hung for ~60s, then hard-stopped the instance, causing every other scheduled run to produce no Dropbox-synced output
+- Increase resume hook sleep from 5s to 15s to let the stale orchestrator exit before `systemd-run` reuses the `agent-resume-runner` unit name
+
 ## [Apr 1, 2026]
 
 ### Added

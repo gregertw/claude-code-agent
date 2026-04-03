@@ -4,7 +4,16 @@
 # Sourced by agent-orchestrator.sh, agent-resume-check.sh, etc.
 # =============================================================================
 
-# Hibernate the instance (or fall back to shutdown).
+# Hibernate the instance.
+# Uses a 10-second timeout on the AWS CLI call — on resume from hibernation the
+# OLD orchestrator process re-enters this function with a stale TCP connection.
+# Without the timeout the CLI hangs ~60s, blocking the agent-resume-runner
+# systemd unit and preventing the new orchestrator from starting.
+# No shutdown fallback: if the call fails (stale connection on resume, or a
+# transient API error), just log a warning and exit.  Cron or the next
+# EventBridge wake will retry.  The old `|| sudo shutdown -h now` caused the
+# resumed process to hard-stop the instance, creating the every-other-run
+# failure pattern.
 do_hibernate() {
   local reason="${1:-Self-stop}"
   echo "${reason}: hibernating instance..."
@@ -12,10 +21,11 @@ do_hibernate() {
   inst_id=$(curl -s --max-time 3 http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "")
   region=$(curl -s --max-time 3 http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "")
   if [[ -n "${inst_id}" && -n "${region}" ]]; then
-    aws ec2 stop-instances --instance-ids "${inst_id}" --region "${region}" --hibernate 2>/dev/null || sudo shutdown -h now
+    timeout 10 aws ec2 stop-instances --instance-ids "${inst_id}" --region "${region}" --hibernate 2>/dev/null || {
+      echo "WARNING: Hibernate API call failed (may be stale connection after resume). Instance stays running."
+    }
   else
-    echo "Could not get instance metadata. Falling back to shutdown."
-    sudo shutdown -h now
+    echo "WARNING: Could not get instance metadata. Instance stays running."
   fi
 }
 

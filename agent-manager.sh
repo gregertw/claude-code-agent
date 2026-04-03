@@ -90,6 +90,58 @@ get_instance_state() {
     --output text 2>/dev/null || echo "unknown"
 }
 
+# --- Check if SSH failure is caused by an IP change --------------------------
+# Residential ISPs assign dynamic IPs via DHCP.  Router reboots, power outages,
+# or lease expiry can change the public IP, breaking the security group rule
+# that was created at deploy time.  This helper detects the mismatch and
+# updates the rule automatically.
+check_and_fix_ssh_ip() {
+  local sg_id
+  sg_id=$(json_get security_group_id)
+  if [[ -z "${sg_id}" ]]; then
+    return 1  # no SG info — can't help
+  fi
+
+  local my_ip
+  my_ip=$(curl -s --max-time 5 https://checkip.amazonaws.com)
+  if [[ -z "${my_ip}" ]]; then
+    return 1  # can't determine current IP
+  fi
+
+  # Get the current SSH rule's CIDR
+  local allowed_ip
+  allowed_ip=$(aws ec2 describe-security-groups \
+    --group-ids "${sg_id}" --region "${REGION}" \
+    --query 'SecurityGroups[0].IpPermissions[?FromPort==`22` && ToPort==`22`].IpRanges[0].CidrIp' \
+    --output text 2>/dev/null || echo "")
+
+  if [[ -z "${allowed_ip}" || "${allowed_ip}" == "None" ]]; then
+    return 1  # no SSH rule found
+  fi
+
+  local allowed_bare="${allowed_ip%/32}"
+  if [[ "${allowed_bare}" == "${my_ip}" ]]; then
+    return 1  # IPs match — SSH failure is something else
+  fi
+
+  warn "Your IP has changed: ${allowed_bare} → ${my_ip}"
+  warn "Updating security group ${sg_id}..."
+
+  # Revoke old rule, add new one
+  aws ec2 revoke-security-group-ingress \
+    --group-id "${sg_id}" --region "${REGION}" \
+    --protocol tcp --port 22 --cidr "${allowed_ip}" >/dev/null 2>&1 || true
+  aws ec2 authorize-security-group-ingress \
+    --group-id "${sg_id}" --region "${REGION}" \
+    --protocol tcp --port 22 \
+    --cidr "${my_ip}/32" >/dev/null 2>&1 || {
+      err "Failed to update security group SSH rule."
+      return 1
+    }
+  log "SSH rule updated to ${my_ip}/32."
+  return 0
+}
+
 # --- Commands ----------------------------------------------------------------
 
 cmd_status() {
@@ -305,16 +357,31 @@ cmd_wakeup() {
   log "Instance is running."
 
   log "Waiting for SSH..."
+  local ssh_ok=false
   for i in $(seq 1 30); do
     if ssh -o ConnectTimeout=5 "${SSH_HOST}" "echo ready" 2>/dev/null; then
+      ssh_ok=true
       break
     fi
-    if [[ $i -eq 30 ]]; then
-      warn "SSH not available after 150 seconds. Try manually: ssh ${SSH_HOST}"
-      return 1
+    # After 30s of failures, check if IP changed before waiting the full 150s
+    if [[ $i -eq 6 ]]; then
+      if check_and_fix_ssh_ip; then
+        # IP was updated — retry SSH immediately
+        for j in $(seq 1 24); do
+          if ssh -o ConnectTimeout=5 "${SSH_HOST}" "echo ready" 2>/dev/null; then
+            ssh_ok=true
+            break 2
+          fi
+          sleep 5
+        done
+      fi
     fi
     sleep 5
   done
+  if [[ "${ssh_ok}" != "true" ]]; then
+    warn "SSH not available after 150 seconds. Try manually: ssh ${SSH_HOST}"
+    return 1
+  fi
 
   # In scheduled mode, immediately create keep-running lock to prevent the
   # orchestrator's active-hours guard from hibernating before we can act.

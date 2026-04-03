@@ -12,7 +12,9 @@
 # =============================================================================
 
 if [ "$1" = "post" ] && { [ "$2" = "hibernate" ] || [ "$2" = "hybrid-sleep" ]; }; then
-    sleep 5  # wait for network/clock sync
+    sleep 15  # wait for network/clock sync AND stale orchestrator to exit
+               # (the old process resumes inside do_hibernate with a stale AWS CLI
+               # connection; timeout 10 in do_hibernate ensures it exits within ~10s)
     # Clear any stale failed transient unit from a previous resume cycle.
     # systemd-run with a fixed --unit name fails if the unit already exists.
     systemctl reset-failed agent-resume-runner.service 2>/dev/null || true
