@@ -304,6 +304,7 @@ PYEOF
 
   # If running, try to get on-server status
   if [[ "${state}" == "running" ]]; then
+    check_and_fix_ssh_ip || true
     echo ""
     local remote_status
     remote_status=$(ssh -o ConnectTimeout=5 "${SSH_HOST}" "agent status" 2>/dev/null) || true
@@ -416,6 +417,9 @@ cmd_sleep() {
     return 1
   fi
 
+  # Proactive IP check before SSH
+  check_and_fix_ssh_ip || true
+
   # In scheduled mode, check if orchestrator is running — it will self-stop when done.
   if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" ]]; then
     local lock_held
@@ -449,6 +453,9 @@ cmd_ssh() {
     err "Instance is ${state}. Use --wakeup first."
     return 1
   fi
+
+  # Proactive IP check — update security group if our IP changed
+  check_and_fix_ssh_ip || true
 
   exec ssh "${SSH_HOST}"
 }
@@ -564,16 +571,30 @@ cmd_run_agent() {
     log "Waiting for instance to be running..."
     aws ec2 wait instance-running --instance-ids "${INSTANCE_ID}" --region "${REGION}"
     log "Waiting for SSH..."
+    local ssh_ok=false
     for i in $(seq 1 30); do
       if ssh -o ConnectTimeout=5 "${SSH_HOST}" "echo ready" 2>/dev/null; then
+        ssh_ok=true
         break
       fi
-      if [[ $i -eq 30 ]]; then
-        warn "SSH not available after 150 seconds."
-        return 1
+      # After 30s of failures, check if IP changed
+      if [[ $i -eq 6 ]]; then
+        if check_and_fix_ssh_ip; then
+          for j in $(seq 1 24); do
+            if ssh -o ConnectTimeout=5 "${SSH_HOST}" "echo ready" 2>/dev/null; then
+              ssh_ok=true
+              break 2
+            fi
+            sleep 5
+          done
+        fi
       fi
       sleep 5
     done
+    if [[ "${ssh_ok}" != "true" ]]; then
+      warn "SSH not available after 150 seconds."
+      return 1
+    fi
   fi
 
   # Check if orchestrator is already running (boot/resume may have started it)
@@ -626,6 +647,9 @@ cmd_ssh_mcp() {
     err "Instance is ${state}. Use --wakeup first."
     return 1
   fi
+
+  # Proactive IP check — update security group if our IP changed
+  check_and_fix_ssh_ip || true
 
   log "Connecting with MCP port forwarding (18850-18852)..."
   exec ssh -L 18850:127.0.0.1:18850 -L 18851:127.0.0.1:18851 -L 18852:127.0.0.1:18852 "${SSH_HOST}"
@@ -1099,6 +1123,9 @@ cmd_log() {
     err "Instance is ${state}. Use --wakeup first."
     return 1
   fi
+
+  # Proactive IP check before SSH
+  check_and_fix_ssh_ip || true
 
   # Get the Nth most recent orchestrator log and the run log it references
   local log_output

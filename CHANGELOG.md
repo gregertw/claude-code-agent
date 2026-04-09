@@ -4,6 +4,14 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Apr 9, 2026]
+
+### Fixed
+
+- Run proactive IP check before SSH in `--ssh`, `--ssh-mcp`, `--status`, `--sleep`, `--log`, and `--run-agent` — previously only `--wakeup` detected IP changes, so all other commands timed out after an ISP IP change
+- Add fallback to regular stop when `do_hibernate()` fails with a genuine API error — previously any failure (permissions, unsupported operation) silently left the instance running forever; stale-connection timeouts (rc=124) still skip the fallback to avoid the resumed-process kill pattern
+- Log actual error output from failed hibernate API calls instead of swallowing stderr
+
 ## [Apr 3, 2026]
 
 ### Added

@@ -9,11 +9,13 @@
 # OLD orchestrator process re-enters this function with a stale TCP connection.
 # Without the timeout the CLI hangs ~60s, blocking the agent-resume-runner
 # systemd unit and preventing the new orchestrator from starting.
-# No shutdown fallback: if the call fails (stale connection on resume, or a
-# transient API error), just log a warning and exit.  Cron or the next
-# EventBridge wake will retry.  The old `|| sudo shutdown -h now` caused the
-# resumed process to hard-stop the instance, creating the every-other-run
-# failure pattern.
+#
+# Fallback logic (exit-code based):
+#   - Exit 124 (timeout killed the command) → likely stale connection after
+#     resume. Do NOT retry — the resumed new orchestrator handles the next cycle.
+#   - Any other non-zero exit → genuine API error (permissions, unsupported
+#     operation, etc.). Safe to fall back to a regular stop because this is a
+#     fresh process with working connections.
 do_hibernate() {
   local reason="${1:-Self-stop}"
   echo "${reason}: hibernating instance..."
@@ -21,8 +23,20 @@ do_hibernate() {
   inst_id=$(curl -s --max-time 3 http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "")
   region=$(curl -s --max-time 3 http://169.254.169.254/latest/meta-data/placement/region 2>/dev/null || echo "")
   if [[ -n "${inst_id}" && -n "${region}" ]]; then
-    timeout 10 aws ec2 stop-instances --instance-ids "${inst_id}" --region "${region}" --hibernate 2>/dev/null || {
-      echo "WARNING: Hibernate API call failed (may be stale connection after resume). Instance stays running."
+    local hib_output
+    hib_output=$(timeout 10 aws ec2 stop-instances --instance-ids "${inst_id}" --region "${region}" --hibernate 2>&1) || {
+      local rc=$?
+      if [[ $rc -eq 124 ]]; then
+        # Timeout — likely stale connection after resume from hibernation.
+        echo "WARNING: Hibernate timed out (rc=124, likely stale connection after resume). Instance stays running."
+      else
+        # Genuine API error — fall back to regular stop.
+        echo "WARNING: Hibernate failed (rc=${rc}): ${hib_output}"
+        echo "Falling back to regular stop..."
+        timeout 10 aws ec2 stop-instances --instance-ids "${inst_id}" --region "${region}" 2>&1 || {
+          echo "WARNING: Regular stop also failed. Instance stays running."
+        }
+      fi
     }
   else
     echo "WARNING: Could not get instance metadata. Instance stays running."
