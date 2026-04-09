@@ -95,6 +95,13 @@ cmd_status() {
     echo -e "  Mode:       ${CYAN}${mode}${NC}"
   fi
 
+  # Keep-alive lock
+  if [[ -f "${HOME}/agents/.keep-running" ]]; then
+    echo -e "  Keep-alive: ${YELLOW}active${NC} (server will NOT self-stop)"
+  else
+    echo -e "  Keep-alive: ${DIM}off${NC}"
+  fi
+
   # Brain dir
   echo -e "  Brain:      ${BRAIN_DIR}"
 

@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ## [Apr 9, 2026]
 
+### Added
+
+- Add `--check-version` command to compare GitHub repo version against deployed server version, showing commit log of available changes
+- Add `--upgrade-agent` command to upgrade server scripts via SSH — refuses to run while orchestrator is active to avoid mid-execution overwrites
+- Show keep-alive lock status in `agent status` output after Mode line
+
 ### Fixed
 
 - Wait for NTP clock sync in resume-check before heartbeat comparison — after hibernate resume the system clock is stale (frozen at hibernation time), causing the heartbeat age to appear as ~0 seconds and silently skipping the orchestrator run

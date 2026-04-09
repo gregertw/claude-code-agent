@@ -1238,6 +1238,96 @@ cmd_trigger() {
   echo "============================================================"
 }
 
+cmd_check_version() {
+  local REPO_URL="https://github.com/gregertw/claude-code-agent.git"
+  local state
+  state=$(get_instance_state)
+
+  # GitHub version: latest commit on remote main
+  echo ""
+  echo -e "${BOLD}Agent Version Check${NC}"
+  echo "─────────────────────────────────"
+
+  local github_rev
+  github_rev=$(git ls-remote "${REPO_URL}" HEAD 2>/dev/null | cut -c1-7) || github_rev="unknown"
+  local github_date
+  github_date=$(curl -s "https://raw.githubusercontent.com/gregertw/claude-code-agent/main/CHANGELOG.md" 2>/dev/null \
+    | grep -m1 '^## \[' | sed 's/## \[\(.*\)\]/\1/') || github_date="unknown"
+
+  echo -e "  GitHub: ${GREEN}${github_rev}${NC} (${github_date})"
+
+  if [[ "${state}" != "running" ]]; then
+    echo -e "  Server: ${DIM}unknown (instance is ${state})${NC}"
+    echo ""
+    echo "  Start the instance with --wakeup to check server version."
+    echo ""
+    return
+  fi
+
+  check_and_fix_ssh_ip || true
+
+  local server_rev
+  server_rev=$(ssh -o ConnectTimeout=5 "${SSH_HOST}" \
+    "git -C ~/.agent-repo rev-parse --short HEAD 2>/dev/null || echo 'unknown'" 2>/dev/null) || server_rev="unknown"
+  local server_date
+  server_date=$(ssh -o ConnectTimeout=5 "${SSH_HOST}" \
+    "grep -m1 '^## \[' ~/.agent-repo/CHANGELOG.md 2>/dev/null | sed 's/## \[\(.*\)\]/\1/'" 2>/dev/null) || server_date="unknown"
+
+  echo -e "  Server: ${CYAN}${server_rev}${NC} (${server_date})"
+  echo ""
+
+  if [[ "${github_rev}" == "${server_rev}" ]]; then
+    echo -e "  ${GREEN}Up to date.${NC}"
+  else
+    echo -e "  ${YELLOW}Update available.${NC} Run ${CYAN}./agent-manager.sh --upgrade-agent${NC} to upgrade."
+    echo ""
+    # Show commits between server and GitHub
+    local changes
+    changes=$(git -C "${SCRIPT_DIR}" log --oneline "${server_rev}..${github_rev}" 2>/dev/null) || changes=""
+    if [[ -n "${changes}" ]]; then
+      echo -e "  ${BOLD}Changes:${NC}"
+      echo "${changes}" | while IFS= read -r line; do
+        echo "    ${line}"
+      done
+    fi
+  fi
+  echo ""
+}
+
+cmd_upgrade_agent() {
+  local state
+  state=$(get_instance_state)
+
+  if [[ "${state}" != "running" ]]; then
+    err "Instance is ${state}. Use --wakeup first."
+    return 1
+  fi
+
+  check_and_fix_ssh_ip || true
+
+  # Check if orchestrator is currently running
+  local lock_status
+  lock_status=$(ssh -o ConnectTimeout=5 "${SSH_HOST}" \
+    "flock -n ~/.agent-orchestrator.lock true 2>/dev/null && echo free || echo held" 2>/dev/null) || lock_status="unknown"
+
+  if [[ "${lock_status}" == "held" ]]; then
+    err "Orchestrator is currently running. Wait for it to finish or use --sleep first."
+    return 1
+  fi
+
+  log "Upgrading agent scripts on server..."
+  echo ""
+
+  local output
+  output=$(ssh -o ConnectTimeout=10 "${SSH_HOST}" \
+    "~/scripts/agent-cli.sh upgrade" 2>/dev/null) || {
+    err "Upgrade failed."
+    return 1
+  }
+
+  echo "${output}"
+}
+
 cmd_help() {
   echo ""
   echo -e "${BOLD}agent-manager${NC} — Manage your agent server"
@@ -1257,6 +1347,8 @@ cmd_help() {
   echo -e "  ${CYAN}./agent-manager.sh --log 3${NC}     Show 3rd most recent log"
   echo -e "  ${CYAN}./agent-manager.sh --trigger${NC}     Show remote trigger URL and token"
   echo -e "  ${CYAN}./agent-manager.sh --ssh${NC}        SSH into the server"
+  echo -e "  ${CYAN}./agent-manager.sh --check-version${NC}  Compare local vs server agent version"
+  echo -e "  ${CYAN}./agent-manager.sh --upgrade-agent${NC}  Upgrade agent scripts on the server"
   echo -e "  ${CYAN}./agent-manager.sh --ssh-mcp${NC}    SSH with MCP port forwarding (for auth)"
   echo -e "  ${CYAN}./agent-manager.sh --help${NC}       Show this help"
   echo ""
@@ -1275,6 +1367,8 @@ case "${1:---status}" in
   --history|history)         cmd_history "${2:-7}" ;;
   --log|log)                 cmd_log "${2:-1}" ;;
   --trigger|trigger)   cmd_trigger ;;
+  --check-version|check-version)   cmd_check_version ;;
+  --upgrade-agent|upgrade-agent)   cmd_upgrade_agent ;;
   --ssh|ssh)           cmd_ssh ;;
   --ssh-mcp|ssh-mcp)   cmd_ssh_mcp ;;
   --help|-h|help)      cmd_help ;;
