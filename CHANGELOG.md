@@ -8,6 +8,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
 ### Fixed
 
+- Wait for NTP clock sync in resume-check before heartbeat comparison — after hibernate resume the system clock is stale (frozen at hibernation time), causing the heartbeat age to appear as ~0 seconds and silently skipping the orchestrator run
+- Move orchestrator log setup (`exec > >(tee ...)`) before the flock check — previously a flock-blocked run produced no `orchestrator-*.log`, making it invisible to `--log`
+- Add file-based logging to `agent-resume-check.sh` — previously all resume-check decisions (skip vs run) went only to the systemd journal, invisible to `--log`
+- Hibernate on orchestrator early-exit errors (no authentication, missing brain directory) in scheduled mode — previously these exits left the server running indefinitely
 - Run proactive IP check before SSH in `--ssh`, `--ssh-mcp`, `--status`, `--sleep`, `--log`, and `--run-agent` — previously only `--wakeup` detected IP changes, so all other commands timed out after an ISP IP change
 - Add fallback to regular stop when `do_hibernate()` fails with a genuine API error — previously any failure (permissions, unsupported operation) silently left the instance running forever; stale-connection timeouts (rc=124) still skip the fallback to avoid the resumed-process kill pattern
 - Log actual error output from failed hibernate API calls instead of swallowing stderr

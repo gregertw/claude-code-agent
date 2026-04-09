@@ -17,6 +17,29 @@ source "${HOME_DIR}/.agent-server.conf" 2>/dev/null || true
 source "${HOME_DIR}/.agent-schedule" 2>/dev/null || true
 SCRIPTS_DIR="${HOME_DIR}/scripts"
 
+# --- Log setup: write to orchestrator log dir so --log can see our decisions --
+ORCH_LOG_DIR="${HOME_DIR}/logs"
+mkdir -p "${ORCH_LOG_DIR}"
+TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+RESUME_LOG="${ORCH_LOG_DIR}/orchestrator-${TIMESTAMP}.log"
+exec > >(tee -a "${RESUME_LOG}") 2>&1
+echo "=== Resume Check at $(date) ==="
+
+# Wait for NTP clock sync — after hibernate resume the system clock is stale
+# (frozen at hibernation time). Without this, the heartbeat age calculation
+# sees AGE ≈ 0 and skips the run.
+echo "Waiting for NTP clock sync..."
+for i in $(seq 1 30); do
+  if timedatectl show --property=NTPSynchronized --value 2>/dev/null | grep -q "yes"; then
+    echo "  Clock synchronized (${i}s)."
+    break
+  fi
+  if [[ $i -eq 30 ]]; then
+    echo "  WARNING: NTP not synchronized after 30s. Proceeding anyway."
+  fi
+  sleep 1
+done
+
 # Heartbeat interval check — skip if last run was within 20% of interval.
 # E.g. 60min interval → threshold 12min. Prevents duplicate runs from rapid
 # re-triggers while still allowing remote triggers shortly after a run.

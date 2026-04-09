@@ -42,23 +42,23 @@ if [[ -f "${SCRIPTS_DIR}/agent-functions.sh" ]]; then
   source "${SCRIPTS_DIR}/agent-functions.sh"
 fi
 
+# --- Setup -------------------------------------------------------------------
+mkdir -p "${ORCH_LOG_DIR}"
+
+exec > >(tee -a "${ORCHESTRATOR_LOG}") 2>&1
+
 # --- Lock: prevent concurrent runs ------------------------------------------
 # Use a lock file with flock to ensure only one orchestrator runs at a time.
-# If another instance is already running, exit silently (cron will retry next interval).
+# If another instance is already running, log and exit (cron will retry next interval).
 exec 9>"${LOCK_FILE}"
 if ! flock -n 9; then
-  echo "Another orchestrator is already running. Exiting."
+  echo "=== Agent Orchestrator at $(date) — blocked by running instance. Exiting. ==="
   exit 0
 fi
 # Lock is held for the lifetime of this process (fd 9 stays open).
 # Export the lock fd number so child scripts (agent-functions.sh) can close it
 # before launching daemons that might outlive the orchestrator.
 export _ORCH_LOCK_FD=9
-
-# --- Setup -------------------------------------------------------------------
-mkdir -p "${ORCH_LOG_DIR}"
-
-exec > >(tee -a "${ORCHESTRATOR_LOG}") 2>&1
 
 echo "=== Agent Orchestrator started at $(date) ==="
 
@@ -123,6 +123,10 @@ if [[ -z "${ANTHROPIC_API_KEY:-}" ]]; then
     echo "Using account login (no API key)."
   else
     echo "ERROR: No authentication found. Set ANTHROPIC_API_KEY or log in via 'claude' first."
+    if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && -z "${NO_STOP}" ]]; then
+      exec 9>&-
+      do_hibernate "No authentication — cannot run"
+    fi
     exit 1
   fi
 fi
@@ -142,6 +146,10 @@ done
 # --- 2. Ensure brain dir exists ----------------------------------------------
 if [[ ! -d "${BRAIN_DIR}" ]]; then
   echo "ERROR: Brain directory not found at ${BRAIN_DIR}"
+  if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && -z "${NO_STOP}" ]]; then
+    exec 9>&-
+    do_hibernate "Brain directory missing — cannot run"
+  fi
   exit 1
 fi
 
