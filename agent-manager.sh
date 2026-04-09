@@ -762,6 +762,7 @@ with open(ct_file) as f:
 scheduled_starts = []  # EventBridge-triggered (= agent ran)
 trigger_starts = []    # Remote trigger (Lambda) (= agent ran)
 manual_starts = []     # Manual wakeups (= awake but no agent run)
+noop_starts = set()    # StartInstances where instance was already running
 stops = []
 
 def parse_ts(ts):
@@ -788,12 +789,22 @@ for ev in ct_data.get("Events", []):
         ce = json.loads(ev.get("CloudTrailEvent", "{}"))
         ua = ce.get("userAgent", "")
         arn = ce.get("userIdentity", {}).get("arn", "")
+        # Check if instance was already running (StartInstances was a no-op).
+        prev_state = ""
+        try:
+            items = ce.get("responseElements", {}).get("instancesSet", {}).get("items", [])
+            if items:
+                prev_state = items[0].get("previousState", {}).get("name", "")
+        except (AttributeError, IndexError, KeyError):
+            pass
         if "EventBridge" in ua or "Scheduler" in ua:
             scheduled_starts.append(dt)
         elif "agent-server-trigger-role" in arn:
             trigger_starts.append(dt)
         else:
             manual_starts.append(dt)
+        if prev_state == "running":
+            noop_starts.add(dt.strftime("%Y%m%d-%H%M%S"))
     elif name == "StopInstances":
         stops.append(dt)
 
@@ -819,11 +830,17 @@ if ct_mode == "primary":
     with open(run_file, "w") as rf:
         rf.write("SOURCE:cloudtrail\n")
         for s in scheduled_starts:
-            rf.write(s.strftime("%Y%m%d-%H%M%S") + "\n")
+            ts = s.strftime("%Y%m%d-%H%M%S")
+            if ts not in noop_starts:
+                rf.write(ts + "\n")
         for s in trigger_starts:
-            rf.write(s.strftime("%Y%m%d-%H%M%S") + "\n")
+            ts = s.strftime("%Y%m%d-%H%M%S")
+            if ts not in noop_starts:
+                rf.write(ts + "\n")
         for s in manual_starts:
-            rf.write("AWAKE:" + s.strftime("%Y%m%d-%H%M%S") + "\n")
+            ts = s.strftime("%Y%m%d-%H%M%S")
+            if ts not in noop_starts:
+                rf.write("AWAKE:" + ts + "\n")
 
 # For single-day view, build event pairs sorted chronologically.
 # In supplement mode, merge CloudTrail events with existing SSH-based events,
@@ -834,6 +851,43 @@ if days == 1:
     today_stops = [s for s in stops if s.strftime("%Y-%m-%d") == today_str]
     is_scheduled = set(s.strftime("%Y%m%d-%H%M%S") for s in scheduled_starts)
     is_trigger = set(s.strftime("%Y%m%d-%H%M%S") for s in trigger_starts)
+
+    # Build a map from each start to its matching stop.
+    # Each stop pairs with the last start before it (not all starts before it).
+    start_to_stop = {}
+    stop_idx = 0
+    for si in range(len(today_starts)):
+        s = today_starts[si]
+        # A stop matches this start only if no later start exists before that stop.
+        next_start = today_starts[si + 1] if si + 1 < len(today_starts) else None
+        while stop_idx < len(today_stops):
+            st = today_stops[stop_idx]
+            if st <= s:
+                stop_idx += 1
+                continue
+            if next_start and st > next_start:
+                break  # this stop is after the next start — belongs to a later group
+            start_to_stop[s] = st
+            stop_idx += 1
+            break
+
+    def write_start_event(ef, s, ts_str):
+        """Write a START/TRIGGER/WAKEUP line, with NOOP_ prefix if already running."""
+        is_noop = ts_str in noop_starts
+        if ts_str in is_trigger:
+            prefix = "NOOP_TRIGGER" if is_noop else "TRIGGER"
+        elif ts_str in is_scheduled:
+            prefix = "NOOP_START" if is_noop else "START"
+        else:
+            prefix = "NOOP_WAKEUP" if is_noop else "WAKEUP"
+        ef.write(f"{prefix}:{ts_str}\n")
+
+    def write_stop_event(ef, s):
+        """Write ENDTIME + hibernate line if this start has a matching stop."""
+        matching_stop = start_to_stop.get(s)
+        if matching_stop:
+            ef.write(f"ENDTIME:{int(matching_stop.timestamp())}\n")
+            ef.write("hibernating instance\n")
 
     if ct_mode == "supplement":
         # Read existing SSH-based events to find which hours already have entries.
@@ -856,41 +910,15 @@ if days == 1:
                 if hour_str in existing_start_hours:
                     continue  # orchestrator log already covers this start
                 ts_str = s.strftime("%Y%m%d-%H%M%S")
-                if ts_str in is_trigger:
-                    ef.write(f"TRIGGER:{ts_str}\n")
-                elif ts_str in is_scheduled:
-                    ef.write(f"START:{ts_str}\n")
-                else:
-                    ef.write(f"WAKEUP:{ts_str}\n")
-                # Find the closest stop after this start
-                matching_stop = None
-                for st in today_stops:
-                    if st > s:
-                        matching_stop = st
-                        break
-                if matching_stop:
-                    ef.write(f"ENDTIME:{int(matching_stop.timestamp())}\n")
-                    ef.write("hibernating instance\n")
+                write_start_event(ef, s, ts_str)
+                write_stop_event(ef, s)
     else:
         # Primary mode — write all events from CloudTrail
         with open(events_file, "w") as ef:
             for s in today_starts:
                 ts_str = s.strftime('%Y%m%d-%H%M%S')
-                if ts_str in is_scheduled:
-                    ef.write(f"START:{ts_str}\n")
-                elif ts_str in is_trigger:
-                    ef.write(f"TRIGGER:{ts_str}\n")
-                else:
-                    ef.write(f"WAKEUP:{ts_str}\n")
-                # Find the closest stop after this start
-                matching_stop = None
-                for st in stops:
-                    if st > s:
-                        matching_stop = st
-                        break
-                if matching_stop:
-                    ef.write(f"ENDTIME:{int(matching_stop.timestamp())}\n")
-                    ef.write("hibernating instance\n")
+                write_start_event(ef, s, ts_str)
+                write_stop_event(ef, s)
 CT_PYEOF
   rm -f "${ct_file}"
 
@@ -1035,10 +1063,16 @@ if days == 1 and events_file:
 
         for line in raw.split("\n"):
             line = line.strip()
-            if line.startswith("START:") or line.startswith("WAKEUP:") or line.startswith("TRIGGER:"):
-                is_manual = line.startswith("WAKEUP:")
-                is_trigger = line.startswith("TRIGGER:")
-                ts_str = line.split(":", 1)[1]
+            # Match START/TRIGGER/WAKEUP and their NOOP_ variants.
+            is_start_line = False
+            is_noop = line.startswith("NOOP_")
+            check = line[5:] if is_noop else line
+            if check.startswith("START:") or check.startswith("WAKEUP:") or check.startswith("TRIGGER:"):
+                is_start_line = True
+                is_manual = check.startswith("WAKEUP:")
+                is_trigger = check.startswith("TRIGGER:")
+            if is_start_line:
+                ts_str = check.split(":", 1)[1]
                 try:
                     dt = datetime.strptime(ts_str[:15], "%Y%m%d-%H%M%S")
                     hm = dt.strftime("%H:%M")
@@ -1046,13 +1080,22 @@ if days == 1 and events_file:
                     group = []
                     current_start = hm
                     end_hm = None
-                    if is_manual:
+                    if is_noop:
+                        # Instance was already running — mark group so no
+                        # "instance woke up" is prepended during rendering.
+                        if is_manual:
+                            group.append((hm, "○", "start triggered (already running)"))
+                        elif is_trigger:
+                            group.append((hm, "▶", "remote trigger (already running)"))
+                        else:
+                            group.append((hm, "▶", "scheduled start (already running)"))
+                    elif is_manual:
                         group.append((hm, "○", "manual wakeup (no agent run)"))
                     elif is_trigger:
                         group.append((hm, "▶", "remote trigger → orchestrator started"))
                     else:
                         group.append((hm, "▶", "orchestrator started"))
-                    event_groups.append((sort_key, group))
+                    event_groups.append((sort_key, group, is_noop))
                 except ValueError:
                     pass
             elif line.startswith("ENDTIME:"):
@@ -1079,15 +1122,16 @@ if days == 1 and events_file:
 
         # Sort groups chronologically, then infer "instance woke up" events.
         # Wake-up is inferred when there's no previous group or the previous
-        # group ended with a stop (▼). Done after sorting so the predecessor
-        # is always the chronologically correct one.
+        # group ended with a stop (▼) — unless this group is a no-op start
+        # (instance was already running per CloudTrail previousState).
         event_groups.sort(key=lambda g: g[0])
         events = []
-        for i, (_, group) in enumerate(event_groups):
-            prev_last_sym = event_groups[i-1][1][-1][1] if i > 0 else "▼"
-            if i == 0 or prev_last_sym == "▼":
-                hm = group[0][0]  # use timestamp of first event in group
-                events.append((hm, "▲", "instance woke up"))
+        for i, (_, group, noop) in enumerate(event_groups):
+            if not noop:
+                prev_last_sym = event_groups[i-1][1][-1][1] if i > 0 else "▼"
+                if i == 0 or prev_last_sym == "▼":
+                    hm = group[0][0]  # use timestamp of first event in group
+                    events.append((hm, "▲", "instance woke up"))
             events.extend(group)
 
         if events:

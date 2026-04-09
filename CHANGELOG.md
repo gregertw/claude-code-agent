@@ -11,6 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/).
 - Run proactive IP check before SSH in `--ssh`, `--ssh-mcp`, `--status`, `--sleep`, `--log`, and `--run-agent` — previously only `--wakeup` detected IP changes, so all other commands timed out after an ISP IP change
 - Add fallback to regular stop when `do_hibernate()` fails with a genuine API error — previously any failure (permissions, unsupported operation) silently left the instance running forever; stale-connection timeouts (rc=124) still skip the fallback to avoid the resumed-process kill pattern
 - Log actual error output from failed hibernate API calls instead of swallowing stderr
+- Detect no-op `StartInstances` in `--history` by checking CloudTrail `previousState` — previously every scheduled start showed "instance woke up" even when the instance was already running
+- Fix `--history` stop-pairing so each `StopInstances` pairs with only the last start before it — previously a single hibernation was duplicated across all preceding starts, showing phantom hibernate events
 
 ## [Apr 3, 2026]
 
