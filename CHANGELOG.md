@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Apr 12, 2026]
+
+### Fixed
+
+- Use CloudWatch CPU utilization to detect agent runs in `--history` when instance is stopped — previously relied solely on CloudTrail StartInstances events, which missed orchestrator runs on days the instance ran continuously without stop/start cycles
+
 ## [Apr 9, 2026]
 
 ### Added

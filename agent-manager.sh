@@ -949,8 +949,9 @@ for d in range(days):
     day = now - timedelta(days=d)
     display_dates.add(day.strftime("%Y-%m-%d"))
 
-# Parse CloudWatch → set of (date_str, hour) in local time
+# Parse CloudWatch → set of (date_str, hour) in local time + CPU values
 awake = set()
+cpu_max = {}
 for dp in cw_raw.get("Datapoints", []):
     ts = dp["Timestamp"]
     try:
@@ -962,7 +963,10 @@ for dp in cw_raw.get("Datapoints", []):
     local_dt = dt.astimezone(local_tz)
     ds = local_dt.strftime("%Y-%m-%d")
     if ds in display_dates:
-        awake.add((ds, local_dt.hour))
+        key = (ds, local_dt.hour)
+        awake.add(key)
+        cpu_val = dp.get("Maximum", 0)
+        cpu_max[key] = max(cpu_max.get(key, 0), cpu_val)
 
 # Parse orchestrator log filenames → set of (date_str, hour) + count per day.
 # Lines prefixed with "AWAKE:" are manual wakeups (no agent run) from CloudTrail.
@@ -990,6 +994,18 @@ for line in run_raw.split("\n"):
                     runs_per_day[ds] += 1
         except ValueError:
             pass
+
+# When run data is estimated from CloudTrail (instance stopped, no SSH),
+# use CloudWatch CPU to detect hours where the agent likely ran.
+# CloudTrail only captures instance Start/Stop events, missing orchestrator
+# runs that happen while the instance is already running continuously.
+CPU_RUN_THRESHOLD = 5  # percent — idle is ~0.5-1.3%, agent runs are ~8-12%+
+if estimated:
+    for key, cpu in cpu_max.items():
+        if cpu > CPU_RUN_THRESHOLD and key not in runs:
+            runs.add(key)
+            # Each high-CPU hour ≈ 1 orchestrator run (cron interval is ~60 min)
+            runs_per_day[key[0]] += 1
 
 # Merge: hours with runs are also awake
 awake |= runs
@@ -1042,7 +1058,7 @@ if total_active_hours > 0 and total_active_hours != total_run_hours:
     idle_hours = total_active_hours - total_run_hours
     print(f"  Hours idle (awake, no run): {idle_hours}")
 if estimated:
-    print(f"  {D}(run counts estimated from CloudTrail — start server for exact counts){NC}")
+    print(f"  {D}(runs estimated from CloudTrail + CPU activity — start server for exact counts){NC}")
 
 # --- Detailed event timeline (single-day only) ------------------------------
 if days == 1 and events_file:
