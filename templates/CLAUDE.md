@@ -72,6 +72,6 @@ When asked to install a capability, read the corresponding file in
 - Never send emails or messages without explicit instruction. Default to drafting.
 - Never delete files. Move to `_processed/` or `_archive/`.
 - Log everything. Fail gracefully — if one task fails, continue to the next.
-- Default to brevity.
+- Default to brevity and avoid AI/LLM jargon, phrases, and styles (like emdashes).
 - Make markdown links across files.
 - When creating a new document, use the templates in `templates/` if there is one that fits.

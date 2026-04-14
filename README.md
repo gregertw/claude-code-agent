@@ -1,7 +1,18 @@
 # Self-Improving AI Agent — Setup Guide
 
+## Introduction to humans
+
 A continuously running AI agent that processes tasks, maintains cross-session memory,
-and improves itself over time.
+and improves itself over time. Let your Claude Cowork or Claude Code help you set up
+an agent locally on your computer or in AWS by pointing it to this repository.
+You can use this prompt:
+
+```
+At https://github.com/gregertw/claude-code-agent you will find instructions for how to set up
+an autonomous agent. Clone the repo or download the zip file and follow the instructions to
+help me set up an agent.
+```
+
 
 ## FOR AIs: Setup Instructions
 

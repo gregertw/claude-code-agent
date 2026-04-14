@@ -194,6 +194,15 @@ Output: <file path if applicable>
 
 For tasks with nothing to report: `## [HH:MM] <task name> — nothing new`
 
+**Compact mode**: When ALL tasks in a run report "nothing new" (no files changed, no new emails, no new items added to ACTIONS.md), use a single compact summary instead of individual task sections:
+
+```markdown
+## [HH:MM] Run — no changes
+All tasks checked, nothing new. Email: 0 unread. Calendar: no changes. Inbox: empty.
+```
+
+This keeps quiet-hours and low-activity runs from generating 30+ lines of "nothing new" entries that obscure actual events when scanning logs.
+
 **End-of-run summary** (keep brief):
 ```markdown
 ---
@@ -209,7 +218,7 @@ Do NOT include "Notable Items" or "Next Recommended Actions" sections — those 
 
 ## Error Handling
 
-- **MCP connection failure**: Log the error, skip tasks requiring that MCP, continue with remaining tasks.
+- **MCP connection failure**: Log the error, skip tasks requiring that MCP, continue with remaining tasks. **Escalation**: If a required MCP (especially ActingWeb or Gmail) has been unavailable for 3+ consecutive runs — check recent logs for repeated "MCP unavailable" or "skipped" entries — add a persistent warning to ACTIONS.md: "⚠️ **<MCP name> MCP unavailable** — has been down for <N> consecutive runs. Tasks affected: <list>." Remove the warning automatically once the MCP reconnects successfully.
 - **API rate limit**: Wait 30 seconds and retry once. If still failing, log as deferred.
 - **Ambiguous task**: If a task instruction is unclear, log it as deferred with "needs clarification" and move on.
 - **Large task**: If a task would take more than 5 minutes, log as deferred with scope estimate.
@@ -262,6 +271,7 @@ After all tasks are processed:
    - Self-review proposals awaiting decision
 3. **Update the header fields**: Set "Last updated" to the current date and time (`YYYY-MM-DD HH:MM`), and update the "Latest run log" link to point to the current run's log file. If the "Last updated" field doesn't exist in the header yet, add it on the line before the "Latest run log" line.
 4. **Keep it concise** — group items under: Today, This week, Coming up, Reading, Pending decisions. Remove sections if empty. Remove past events that are done.
+5. **Prune stale reading items** — Reading items (news reports, newsletter digests) older than 3 days should be removed. Keep only the most recent 2 days of reading items. This prevents the Reading section from growing unbounded.
 
 **Item format**: Every action item must have an indented comment line below it for owner input:
 ```markdown

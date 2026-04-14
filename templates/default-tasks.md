@@ -72,8 +72,15 @@ Format:
 
 - **"Last actioned"** means the user opened, replied to, or referenced the sender's email (check Gmail read status if available, otherwise default to "never")
 - **Whitelisted senders**: Senders whose content regularly matches the interest keywords in [personal.md](personal.md) are whitelisted — never suggest unsubscribing from them. If a sender's content matched interest keywords in 2+ of the last 5 digests, consider them whitelisted.
-- When a **non-whitelisted** sender reaches **5+ emails in 30 days with "never" actioned**, add to `ACTIONS.md` under Pending decisions: "Unsubscribe suggestion: <Sender> has sent <N> emails in 30 days, none actioned. Unsubscribe?"
-- Reset count monthly (on the 1st, clear entries older than 30 days)
+- When a **non-whitelisted** sender reaches **5+ emails in 30 days with "never" actioned**, add to the **unsubscribe batch** in `ACTIONS.md` under Pending decisions. Use a single consolidated item with a checklist rather than one item per sender:
+  ```markdown
+  - [ ] **Unsubscribe batch** — Non-whitelisted senders with 5+ emails/30d, none actioned. Check senders to unsubscribe:
+    - [ ] Sender A (12 emails)
+    - [ ] Sender B (8 emails)
+    >
+  ```
+  On each run, update the batch: add new senders that crossed the threshold, update counts, and remove senders the owner has checked off (treat checked sub-items as "unsubscribe approved"). Note whitelisted senders parenthetically if they appear in the count but are exempt.
+- **Monthly reset**: On every run, check today's date. If it is the 1st of the month (or the first run after the 1st, e.g. if no runs happened on the 1st), remove all rows from `sender-frequency.md` where "Last seen" is older than 30 days and reset remaining counts to 0. Log: "Sender frequency reset for <month>." To detect whether the reset already happened this month, check if any row still has a count carried over from the previous month — if all counts are 0 or fresh, skip.
 - Keep the file concise — only track promotional/newsletter senders, not personal or transactional email
 
 Skip this task if Gmail MCP is not connected (log a warning).
@@ -161,6 +168,15 @@ Read the heartbeat file (at the output folder root, named `.agent-heartbeat`) to
 **Frequency**: Only run once per day (check date against last review in `output/improvements/`)
 
 Review recent activity and propose improvements. This is how the agent gets better over time.
+
+### Clean up resolved proposals
+
+Before reviewing new activity, check previous proposal files in `output/improvements/` that are still linked from ACTIONS.md under "Pending decisions". For each:
+1. Read the proposal and check whether the suggested change has already been implemented in the target file (e.g. the rule was added to `default-tasks.md`)
+2. If implemented: remove or update the corresponding ACTIONS.md entry and note "resolved" in the current review
+3. If partially implemented or rejected by the owner (via `>` comment): update accordingly
+
+This prevents resolved proposals from accumulating indefinitely in ACTIONS.md.
 
 ### What to review
 

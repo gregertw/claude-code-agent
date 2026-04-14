@@ -4,6 +4,22 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [Apr 14, 2026]
+
+### Added
+
+- Add Todoist capability for task management integration — sync tasks to ACTIONS.md, complete from dashboard, create from inbox
+- Add compact logging mode for quiet runs — single summary line instead of per-task "nothing new" entries
+- Add MCP escalation rule — persistent ACTIONS.md warning after 3+ consecutive runs with unavailable MCP
+- Add stale reading item pruning — auto-remove Reading section items older than 3 days
+- Add resolved proposal cleanup step to Self-Review task — prevent stale proposals from accumulating in ACTIONS.md
+- Add consolidated unsubscribe batch format with smart monthly reset logic
+- Add anti-AI-jargon rule to CLAUDE.md Key Rules
+
+### Changed
+
+- Improve README introduction with setup prompt for humans
+
 ## [Apr 12, 2026]
 
 ### Fixed
