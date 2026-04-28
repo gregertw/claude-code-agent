@@ -30,6 +30,7 @@ import os
 import sys
 import urllib.request
 import urllib.error
+import urllib.parse
 
 API_BASE = "https://api.agentmail.to/v0"
 
@@ -93,11 +94,28 @@ def api_request(method, path, api_key, data=None):
 
     try:
         with urllib.request.urlopen(req) as resp:
-            return json.loads(resp.read().decode())
+            raw = resp.read().decode()
+            return json.loads(raw) if raw else {}
     except urllib.error.HTTPError as e:
         error_body = e.read().decode() if e.fp else ""
         print(f"API error {e.code}: {error_body}", file=sys.stderr)
         sys.exit(1)
+
+
+def encode_id(value):
+    """URL-encode a path segment.
+
+    Agentmail message IDs are RFC 5322 Message-IDs like
+    ``<abc=@example.com>`` and contain ``<``, ``>``, ``@``, ``=`` — all
+    unsafe in a URL path. If the caller supplied the ID without the angle
+    brackets, add them back (the API stores IDs with brackets).
+    """
+    if not value:
+        return value
+    # Re-add angle brackets if stripped (e.g. by shell or by hand-copying)
+    if "@" in value and not value.startswith("<"):
+        value = f"<{value}>"
+    return urllib.parse.quote(value, safe="")
 
 
 def cmd_list_unread(args):
@@ -120,15 +138,17 @@ def cmd_list_unread(args):
 
 def cmd_get_message(args):
     api_key, inbox_id = get_credentials()
-    result = api_request("GET", f"/inboxes/{inbox_id}/messages/{args.message_id}", api_key)
+    mid = encode_id(args.message_id)
+    result = api_request("GET", f"/inboxes/{inbox_id}/messages/{mid}", api_key)
     print(json.dumps(result, indent=2))
 
 
 def cmd_mark_read(args):
     api_key, inbox_id = get_credentials()
+    mid = encode_id(args.message_id)
     api_request(
         "PATCH",
-        f"/inboxes/{inbox_id}/messages/{args.message_id}",
+        f"/inboxes/{inbox_id}/messages/{mid}",
         api_key,
         {"remove_labels": ["unread"]},
     )
@@ -171,7 +191,8 @@ def _extract_email(from_field):
 def cmd_reply(args):
     api_key, inbox_id = get_credentials()
     # Get original message to find thread
-    original = api_request("GET", f"/inboxes/{inbox_id}/messages/{args.message_id}", api_key)
+    mid = encode_id(args.message_id)
+    original = api_request("GET", f"/inboxes/{inbox_id}/messages/{mid}", api_key)
     reply_addr = _extract_email(original.get("from", ""))
     subject = original.get("subject", "")
     if not subject.lower().startswith("re:"):
@@ -193,7 +214,8 @@ def cmd_reply(args):
 
 def cmd_forward(args):
     api_key, inbox_id = get_credentials()
-    original = api_request("GET", f"/inboxes/{inbox_id}/messages/{args.message_id}", api_key)
+    mid = encode_id(args.message_id)
+    original = api_request("GET", f"/inboxes/{inbox_id}/messages/{mid}", api_key)
     subject = original.get("subject", "")
     if not subject.lower().startswith("fwd:"):
         subject = f"Fwd: {subject}"
@@ -283,9 +305,11 @@ def cmd_get_thread(args):
 
 def cmd_get_attachment(args):
     api_key, inbox_id = get_credentials()
+    mid = encode_id(args.message_id)
+    aid = urllib.parse.quote(args.attachment_id, safe="")
     result = api_request(
         "GET",
-        f"/inboxes/{inbox_id}/messages/{args.message_id}/attachments/{args.attachment_id}",
+        f"/inboxes/{inbox_id}/messages/{mid}/attachments/{aid}",
         api_key,
     )
     # If the result has content (base64), decode and save to file
