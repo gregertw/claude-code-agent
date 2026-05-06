@@ -4,6 +4,23 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/).
 
+## [May 6, 2026]
+
+### Added
+
+- Add ActingWeb Agent OS mode via `ACTINGWEB_MODE="agentos"` in `agent.conf` — instructions and outputs live in ActingWeb, brain directory holds only run logs and heartbeat
+- Add `docs/actingweb-modes.md` describing memory-only vs Agent OS modes and the Instructions-Update Mode lock semantics
+- Add `templates/CLAUDE-agentos.md` — minimal Claude Code project file installed in agentos mode that points the agent at ActingWeb instead of local files
+- Show ActingWeb mode in `agent status` output; suppress the inbox count in agentos mode
+- Document binary-storage MCP options (Dropbox, Google Drive, OneDrive, S3) for handling attachments in README and customization guide
+
+### Changed
+
+- Branch the orchestrator master prompt by mode — agentos prompts the agent to read instructions via `instruction_load()` and write outputs via `output_create()`
+- Skip Dropbox/Maestral sync in agentos mode (still active in memory mode)
+- `agent-setup.sh` skips template install and creates only `output/logs/` in agentos mode; installs the agentos `CLAUDE.md` to override any leftover memory-mode file
+- Setup READMEs (`docs/local-setup.md`, `docs/aws-setup.md`) now ask which ActingWeb mode to use; memory-only remains the default
+
 ## [Apr 28, 2026]
 
 ### Fixed

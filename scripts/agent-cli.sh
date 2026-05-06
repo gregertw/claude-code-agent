@@ -48,6 +48,7 @@ source "${HOME}/.agent-server.conf" 2>/dev/null || true
 source "${HOME}/.agent-schedule" 2>/dev/null || true
 
 OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
+ACTINGWEB_MODE="${ACTINGWEB_MODE:-memory}"
 BRAIN_DIR="${HOME}/brain"
 
 LOG_DIR="${BRAIN_DIR}/${OUTPUT_FOLDER}/logs"
@@ -102,7 +103,8 @@ cmd_status() {
     echo -e "  Keep-alive: ${DIM}off${NC}"
   fi
 
-  # Brain dir
+  # ActingWeb mode + brain dir
+  echo -e "  ActingWeb:  ${CYAN}${ACTINGWEB_MODE}${NC}"
   echo -e "  Brain:      ${BRAIN_DIR}"
 
   # Heartbeat
@@ -134,12 +136,16 @@ cmd_status() {
     echo -e "  Last run:   ${DIM}no heartbeat yet${NC}"
   fi
 
-  # Inbox count
-  local inbox_count=0
-  if [[ -d "$INBOX_DIR" ]]; then
-    inbox_count=$(find "$INBOX_DIR" -maxdepth 1 \( -name '*.txt' -o -name '*.md' \) ! -name '_*' 2>/dev/null | wc -l | tr -d ' ')
+  # Inbox count (memory mode only — agentos has no inbox folder)
+  if [[ "${ACTINGWEB_MODE}" == "memory" ]]; then
+    local inbox_count=0
+    if [[ -d "$INBOX_DIR" ]]; then
+      inbox_count=$(find "$INBOX_DIR" -maxdepth 1 \( -name '*.txt' -o -name '*.md' \) ! -name '_*' 2>/dev/null | wc -l | tr -d ' ')
+    fi
+    echo -e "  Inbox:      ${inbox_count} pending task(s)"
+  else
+    echo -e "  Inbox:      ${DIM}n/a (agentos — queue via ActingWeb Context Builder)${NC}"
   fi
-  echo -e "  Inbox:      ${inbox_count} pending task(s)"
 
   # Recent logs
   local log_count

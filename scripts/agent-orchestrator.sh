@@ -144,25 +144,37 @@ for i in $(seq 1 30); do
 done
 
 # --- 2. Ensure brain dir exists ----------------------------------------------
+# In agentos mode the brain dir holds only run logs and the heartbeat — create
+# it if missing instead of erroring (no templates / INBOX needed).
 if [[ ! -d "${BRAIN_DIR}" ]]; then
-  echo "ERROR: Brain directory not found at ${BRAIN_DIR}"
-  if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && -z "${NO_STOP}" ]]; then
-    exec 9>&-
-    do_hibernate "Brain directory missing — cannot run"
+  if [[ "${ACTINGWEB_MODE:-memory}" == "agentos" ]]; then
+    mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/logs"
+    echo "Created minimal brain dir for agentos mode at ${BRAIN_DIR}"
+  else
+    echo "ERROR: Brain directory not found at ${BRAIN_DIR}"
+    if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" && -z "${NO_STOP}" ]]; then
+      exec 9>&-
+      do_hibernate "Brain directory missing — cannot run"
+    fi
+    exit 1
   fi
-  exit 1
 fi
 
-# Ensure INBOX and _processed dirs exist
-mkdir -p "${INBOX_DIR}/_processed" 2>/dev/null || true
+# Ensure INBOX and _processed dirs exist (memory mode only)
+if [[ "${ACTINGWEB_MODE:-memory}" == "memory" ]]; then
+  mkdir -p "${INBOX_DIR}/_processed" 2>/dev/null || true
+fi
 
 # --- 2b. Dropbox sync before running Claude ----------------------------------
+# Memory mode only — agentos has nothing on disk to sync.
 # Scheduled mode: start Maestral fresh each run (avoids hibernation daemon issues).
 # Always-on mode: Maestral runs as a systemd service, just wait for idle.
-if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" ]]; then
-  start_dropbox_sync "${HOME_DIR}"
+if [[ "${ACTINGWEB_MODE:-memory}" == "memory" ]]; then
+  if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" ]]; then
+    start_dropbox_sync "${HOME_DIR}"
+  fi
+  wait_for_dropbox_idle "${HOME_DIR}"
 fi
-wait_for_dropbox_idle "${HOME_DIR}"
 
 # --- 3. MCP warm-up ----------------------------------------------------------
 # Fire a quick Claude call that touches MCP servers to wake up connections.
@@ -225,6 +237,51 @@ echo ""
 RUN_DATE=$(date '+%Y-%m-%d %H:%M')
 RUN_DATE_SHORT=$(date +%Y%m%d)
 
+if [[ "${ACTINGWEB_MODE:-memory}" == "agentos" ]]; then
+read -r -d '' MASTER_PROMPT << PROMPT_END || true
+You are running as an autonomous agent on ${OWNER_NAME}'s server. This is an unattended scheduled run in ActingWeb Agent OS mode — your instructions, dashboard, and outputs all live in ActingWeb, not on this filesystem.
+
+## Your Instructions
+
+1. Discover what's available: call the ActingWeb how_to_use() tool. Then load
+   the operational documents with instruction_load() for: agents, tasks,
+   default_tasks, personal, style. Treat \`agents\` as the operational brief
+   (rules, output mechanics, prompt-injection defence) and \`tasks\` as the
+   per-cycle queue.
+
+2. There are two run logs. Both should be produced — they serve different
+   readers:
+   (a) Your stdout is captured by the orchestrator to a local file at
+       ${RUN_LOG} for server-side debugging. Structure your stdout as a
+       markdown log starting with "# Agent Run — ${RUN_DATE}" and follow
+       the logging format from the loaded \`tasks\` instruction.
+   (b) At the end of the run, also call output_create(category="log", ...)
+       with the same summary so it appears in the ActingWeb wiki for the
+       owner to read from any client.
+
+3. Run the standard agent cycle as described in the loaded instructions:
+   pre-run dashboard processing (output_list category="actions", find the
+   rolling 'dashboard' slug, output_get, process owner edits, output_update),
+   each per-cycle task in order, drain one-off tasks via work_on_task(),
+   write the ActingWeb run log per (2b) above, update the dashboard, and
+   save durable insights to memory via save().
+
+4. If a write to instructions fails with JSON-RPC error -32099, the
+   Instructions-Update Mode is locked. Surface the action_required field in
+   your log and continue with reads only — do not retry the write.
+
+5. If an MCP connection is unavailable, log it as skipped and continue.
+   Output writes during a run are pre-authorised — do not ask permission.
+
+IMPORTANT RULES:
+- Never send emails or messages. Only draft (output_create category="email").
+- Fail gracefully — if one task fails, continue to the next.
+- Be concise in logs. ${OWNER_NAME} will review them quickly.
+- Binaries (images, PDFs, attachments): if a binary-storage MCP (Dropbox,
+  Drive, OneDrive, S3) is connected, upload there and reference by URL from
+  text outputs. Never inline binary into ActingWeb outputs.
+PROMPT_END
+else
 read -r -d '' MASTER_PROMPT << PROMPT_END || true
 You are running as an autonomous agent on ${OWNER_NAME}'s server. This is an unattended scheduled run.
 
@@ -273,6 +330,7 @@ IMPORTANT RULES:
 - Each task should take under 5 minutes. Defer if too large.
 - Be concise in logs. ${OWNER_NAME} will review them quickly.
 PROMPT_END
+fi
 
 # --- 5. Run Claude Code with the master prompt -------------------------------
 echo ""
@@ -388,12 +446,16 @@ echo "Exit code: ${CLAUDE_EXIT}"
 echo "Run log: $(basename "${RUN_LOG}")"
 echo "Mode: ${SCHEDULE_MODE:-always-on}"
 
-# Count inbox files (remaining)
-INBOX_REMAINING=0
-if [[ -d "${INBOX_DIR}" ]]; then
-  INBOX_REMAINING=$(find "${INBOX_DIR}" -maxdepth 1 \( -name '*.txt' -o -name '*.md' \) ! -name '_*' 2>/dev/null | wc -l | tr -d ' ')
+# Count inbox files (remaining) — memory mode only
+if [[ "${ACTINGWEB_MODE:-memory}" == "memory" ]]; then
+  INBOX_REMAINING=0
+  if [[ -d "${INBOX_DIR}" ]]; then
+    INBOX_REMAINING=$(find "${INBOX_DIR}" -maxdepth 1 \( -name '*.txt' -o -name '*.md' \) ! -name '_*' 2>/dev/null | wc -l | tr -d ' ')
+  fi
+  echo "Inbox remaining: ${INBOX_REMAINING}"
+else
+  echo "Mode: agentos (instructions and outputs in ActingWeb)"
 fi
-echo "Inbox remaining: ${INBOX_REMAINING}"
 
 if [[ ${CLAUDE_EXIT} -ne 0 ]]; then
   echo ""
@@ -404,9 +466,11 @@ fi
 echo ""
 echo "============================================================"
 
-# --- 9. Wait for Dropbox upload, then stop daemon (scheduled mode) -----------
-wait_for_dropbox_idle "${HOME_DIR}"
-if [[ "${SCHEDULE_MODE:-always-on}" == "scheduled" ]]; then
+# --- 9. Wait for Dropbox upload, then stop daemon (memory + scheduled mode) --
+if [[ "${ACTINGWEB_MODE:-memory}" == "memory" ]]; then
+  wait_for_dropbox_idle "${HOME_DIR}"
+fi
+if [[ "${ACTINGWEB_MODE:-memory}" == "memory" && "${SCHEDULE_MODE:-always-on}" == "scheduled" ]]; then
   stop_dropbox_sync "${HOME_DIR}"
 fi
 

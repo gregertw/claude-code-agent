@@ -48,6 +48,7 @@ OUTPUT_FOLDER="${OUTPUT_FOLDER:-output}"
 SETUP_ACTINGWEB="${SETUP_ACTINGWEB:-true}"
 SETUP_GMAIL="${SETUP_GMAIL:-false}"
 SETUP_GOOGLE_CALENDAR="${SETUP_GOOGLE_CALENDAR:-false}"
+ACTINGWEB_MODE="${ACTINGWEB_MODE:-memory}"
 BRAIN_DIR="${HOME}/brain"
 
 export PATH="${HOME}/.local/bin:${HOME}/.cargo/bin:/usr/local/bin:$PATH"
@@ -63,7 +64,7 @@ ISSUES=0
 # =============================================================================
 # Step 1: Brain directory and templates
 # =============================================================================
-echo -e "${BOLD}Step 1: Brain directory${NC}"
+echo -e "${BOLD}Step 1: Brain directory${NC} ${DIM}(mode: ${ACTINGWEB_MODE})${NC}"
 echo "────────────────────────────────────────"
 
 # 1a. Brain directory exists
@@ -78,57 +79,99 @@ else
   ok "Created: ${BRAIN_DIR}"
 fi
 
-# 1b. Template files installed
-TEMPLATES_INSTALLED=true
-for tmpl in tasks.md default-tasks.md personal.md style.md personal-tasks.md; do
-  if [[ ! -f "${BRAIN_DIR}/ai/instructions/${tmpl}" ]]; then
-    TEMPLATES_INSTALLED=false
-    break
-  fi
-done
-if [[ ! -f "${BRAIN_DIR}/CLAUDE.md" ]]; then
-  TEMPLATES_INSTALLED=false
-fi
-
-if [[ "${TEMPLATES_INSTALLED}" == "true" ]]; then
-  ok "Template files installed"
-elif [[ "${VERIFY_ONLY}" == "true" ]]; then
-  need "Template files missing"
-  ISSUES=$((ISSUES + 1))
-else
-  if [[ -x "${HOME}/scripts/install-templates.sh" ]]; then
-    log "Installing template files..."
-    "${HOME}/scripts/install-templates.sh" --upgrade
-    ok "Templates installed"
+if [[ "${ACTINGWEB_MODE}" == "agentos" ]]; then
+  # Agent OS mode: instructions and outputs live in ActingWeb. Brain dir holds
+  # only run logs and the heartbeat — no templates, no INBOX, no output subdirs.
+  if [[ -d "${BRAIN_DIR}/${OUTPUT_FOLDER}/logs" ]]; then
+    ok "Run-log directory exists"
+  elif [[ "${VERIFY_ONLY}" == "true" ]]; then
+    need "Run-log directory missing"
+    ISSUES=$((ISSUES + 1))
   else
-    warn "install-templates.sh not found"
+    mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/logs"
+    ok "Run-log directory created"
+  fi
+
+  # Install / refresh agentos CLAUDE.md so Claude Code's auto-loaded project
+  # instructions match the mode. The memory-mode CLAUDE.md (if present from a
+  # prior install) would otherwise tell the agent to read non-existent local
+  # files. Always overwrite — the file is fully managed by this script in
+  # agentos mode.
+  AGENTOS_CLAUDE_SRC="${HOME}/.agent-templates/CLAUDE-agentos.md"
+  if [[ -f "${AGENTOS_CLAUDE_SRC}" ]]; then
+    if [[ "${VERIFY_ONLY}" == "true" ]]; then
+      if cmp -s "${AGENTOS_CLAUDE_SRC}" "${BRAIN_DIR}/CLAUDE.md" 2>/dev/null; then
+        ok "Agent OS CLAUDE.md installed"
+      else
+        need "Agent OS CLAUDE.md missing or out of date"
+        ISSUES=$((ISSUES + 1))
+      fi
+    else
+      cp "${AGENTOS_CLAUDE_SRC}" "${BRAIN_DIR}/CLAUDE.md"
+      ok "Agent OS CLAUDE.md installed"
+    fi
+  else
+    warn "CLAUDE-agentos.md template not found at ${AGENTOS_CLAUDE_SRC}"
     ISSUES=$((ISSUES + 1))
   fi
-fi
 
-# 1c. Output directories
-DIRS_OK=true
-for subdir in tasks logs research improvements; do
-  if [[ ! -d "${BRAIN_DIR}/${OUTPUT_FOLDER}/${subdir}" ]]; then
-    DIRS_OK=false
-    break
-  fi
-done
-[[ ! -d "${BRAIN_DIR}/INBOX/_processed" ]] && DIRS_OK=false
-
-if [[ "${DIRS_OK}" == "true" ]]; then
-  ok "Output directories exist"
-elif [[ "${VERIFY_ONLY}" == "true" ]]; then
-  need "Some output directories missing"
-  ISSUES=$((ISSUES + 1))
+  echo "  ${DIM}Skipping ai/instructions templates — those live in ActingWeb.${NC}"
+  echo "  ${DIM}Make sure Agent OS is enabled in the ActingWeb web app.${NC}"
 else
-  mkdir -p "${BRAIN_DIR}/ai/instructions"
-  mkdir -p "${BRAIN_DIR}/INBOX/_processed"
-  mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/tasks"
-  mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/logs"
-  mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/research"
-  mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/improvements"
-  ok "Output directories created"
+  # Memory mode: full brain dir with templates, INBOX, output subdirs.
+
+  # 1b. Template files installed
+  TEMPLATES_INSTALLED=true
+  for tmpl in tasks.md default-tasks.md personal.md style.md personal-tasks.md; do
+    if [[ ! -f "${BRAIN_DIR}/ai/instructions/${tmpl}" ]]; then
+      TEMPLATES_INSTALLED=false
+      break
+    fi
+  done
+  if [[ ! -f "${BRAIN_DIR}/CLAUDE.md" ]]; then
+    TEMPLATES_INSTALLED=false
+  fi
+
+  if [[ "${TEMPLATES_INSTALLED}" == "true" ]]; then
+    ok "Template files installed"
+  elif [[ "${VERIFY_ONLY}" == "true" ]]; then
+    need "Template files missing"
+    ISSUES=$((ISSUES + 1))
+  else
+    if [[ -x "${HOME}/scripts/install-templates.sh" ]]; then
+      log "Installing template files..."
+      "${HOME}/scripts/install-templates.sh" --upgrade
+      ok "Templates installed"
+    else
+      warn "install-templates.sh not found"
+      ISSUES=$((ISSUES + 1))
+    fi
+  fi
+
+  # 1c. Output directories
+  DIRS_OK=true
+  for subdir in tasks logs research improvements; do
+    if [[ ! -d "${BRAIN_DIR}/${OUTPUT_FOLDER}/${subdir}" ]]; then
+      DIRS_OK=false
+      break
+    fi
+  done
+  [[ ! -d "${BRAIN_DIR}/INBOX/_processed" ]] && DIRS_OK=false
+
+  if [[ "${DIRS_OK}" == "true" ]]; then
+    ok "Output directories exist"
+  elif [[ "${VERIFY_ONLY}" == "true" ]]; then
+    need "Some output directories missing"
+    ISSUES=$((ISSUES + 1))
+  else
+    mkdir -p "${BRAIN_DIR}/ai/instructions"
+    mkdir -p "${BRAIN_DIR}/INBOX/_processed"
+    mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/tasks"
+    mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/logs"
+    mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/research"
+    mkdir -p "${BRAIN_DIR}/${OUTPUT_FOLDER}/improvements"
+    ok "Output directories created"
+  fi
 fi
 
 echo ""

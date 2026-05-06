@@ -50,33 +50,66 @@ including an AWS account.
 - **Option B: AWS EC2 Setup** — Cloud instance that runs autonomously on a
   schedule. Best for unattended background processing.
 
-### Step 2: Follow the setup guide
+### Step 2: Choose ActingWeb mode
 
-Based on their answer, open the corresponding guide and follow it step by step:
+Ask the user how they want to use ActingWeb. **Default to memory-only** —
+recommend it unless the user already knows they want to run from multiple
+clients.
 
-- **Option A**: `docs/local-setup.md`
-- **Option B**: `docs/aws-setup.md`
+- **Memory-only** (default) — ActingWeb stores cross-session memory.
+  Instructions and outputs live in a brain directory on the machine you set
+  up. Simplest setup.
+- **Agent OS** — ActingWeb also stores instructions, the dashboard, and
+  outputs. The agent can do a full run from any client (Claude Desktop,
+  ChatGPT, browser, EC2) without a brain directory. Requires turning Agent
+  OS on in the ActingWeb web app first.
+
+See [`docs/actingweb-modes.md`](docs/actingweb-modes.md) for the full
+comparison and the lock semantics. Remember the choice — later steps branch
+on it.
+
+### Step 3: Follow the setup guide
+
+Based on the option/mode answers, open the corresponding guide:
+
+- **Option A + memory-only**: `docs/local-setup.md` (full guide).
+- **Option A + Agent OS**: skip `docs/local-setup.md` Step 2 (no brain
+  directory). The user enables Agent OS in the ActingWeb web app, then
+  connects the `actingweb` MCP from Claude Desktop / Cowork. Jump straight
+  to personalization (Step 5 below).
+- **Option B + memory-only**: `docs/aws-setup.md` (full guide).
+- **Option B + Agent OS**: follow `docs/aws-setup.md` for the EC2 build, but
+  the brain-directory provisioning step becomes a no-op — see the Agent OS
+  notes in that guide.
 
 Each guide ends with "Return to README.md for the personalization step."
 When the user has completed all setup steps in the guide, continue here.
 
-### Step 3: Personalize the agent
+### Step 5: Personalize the agent
 
-The `personal.md` and `style.md` files in the brain directory are **templates
-with placeholders**. Do NOT fill them in yourself. Guide the user through
-filling them in interactively using the prompt below.
+In **memory-only** mode, `personal.md` and `style.md` in the brain directory
+are templates with placeholders. In **Agent OS** mode, the equivalents live
+in ActingWeb as the `personal` and `style` instructions, also seeded from
+the same templates.
+
+Do NOT fill them in yourself. Guide the user through filling them in
+interactively using the prompt below — pick the variant that matches the
+chosen mode.
 
 **Where to run this:**
 
-- **Option A**: The user should start a new **Cowork session** in Claude Desktop,
-  choose "Work in a folder", and select their brain directory. Then paste the
-  prompt below into that session. Output the full brain directory path so the
-  user knows exactly which folder to select.
-- **Option B**: The user should SSH into the server (`./agent-manager.sh --ssh`)
-  and start Claude Code in the brain directory: `cd ~/brain && claude`. Then
-  paste the prompt below.
+- **Option A + memory-only**: The user starts a **Cowork session** in Claude
+  Desktop, chooses "Work in a folder", and selects their brain directory.
+  Output the full brain directory path so they know which folder to select.
+- **Option A + Agent OS**: The user starts a Claude Desktop / Cowork session
+  with the `actingweb` MCP connected — no folder needed. They can also paste
+  the prompt into ChatGPT or any client with `actingweb` connected.
+- **Option B + memory-only**: The user SSHes into the server
+  (`./agent-manager.sh --ssh`) and runs `cd ~/brain && claude`.
+- **Option B + Agent OS**: Same SSH, but `claude` can be started from any
+  directory — the agent reads instructions from ActingWeb, not the disk.
 
-**Prompt to paste** — output this as a code block for the user to copy:
+**Prompt to paste — memory-only mode** (output as a code block):
 
 ```txt
 Read the instruction files in ai/instructions/ and introduce yourself.
@@ -99,6 +132,36 @@ After personalization, wrap up by doing the following:
    email) and briefly list them — offer to install any that interest me.
 5. Give me a summary of what the agent can do now — what default tasks are
    configured, how to queue one-off tasks, and how to customize.
+```
+
+**Prompt to paste — Agent OS mode** (output as a code block):
+
+```txt
+Call ActingWeb how_to_use() and introduce yourself based on what's installed.
+Then load my instructions: instruction_list(), then instruction_load() for
+agents, tasks, default_tasks, personal, and style.
+
+Walk me through personalizing the `personal` and `style` instructions:
+- Search ActingWeb memories for any existing personal context or preferences
+- If Gmail is connected, analyze my recent sent emails to infer my writing style
+- Ask me questions to fill in the remaining gaps in the seeded templates
+- Save the result with instruction_save(name="personal", ...) and
+  instruction_save(name="style", ...)
+- If a save fails with JSON-RPC error -32099, the Instructions-Update Mode is
+  locked. Surface the action_required field and ask me to unlock in the web
+  app, then retry.
+
+After personalization, wrap up:
+1. Give me a direct link to the Context Builder using my actor_id from
+   how_to_use(): https://ai.actingweb.io/{actor_id}/app/builder
+2. Show me the actions dashboard via output_list(category="actions") — find
+   the rolling `dashboard` slug, output_get it, and explain it is the wiki-
+   style equivalent of ACTIONS.md.
+3. Tell me I can run a full agent run from any client connected to ActingWeb
+   (Claude Desktop, ChatGPT, browser, EC2). Mention the binary-storage MCP
+   options if I want to handle attachments.
+4. Summarize the default tasks configured in `tasks` and `default_tasks`, and
+   how to queue one-off work via the Context Builder.
 ```
 
 **Option A addition**: After the user pastes the prompt above, also suggest
@@ -204,6 +267,23 @@ credentials needed.
 After adding, authenticate via OAuth (browser sign-in). On headless servers,
 Claude Code provides a URL to open manually — see your option's setup guide.
 
+### Binary storage (optional, recommended for Agent OS)
+
+ActingWeb outputs hold text and markdown only. For binaries (images, PDFs,
+audio, attachments) connect a storage MCP and reference uploaded files by
+URL or path from your text outputs. Recommended when running Agent OS from
+clients without a local filesystem (browser, ChatGPT, Claude Desktop).
+
+Common options — any MCP that exposes upload + share-link tools works:
+
+- **Dropbox** — community MCP servers exist; sign in with OAuth
+- **Google Drive** — community MCP servers; OAuth with Google
+- **OneDrive** — community MCP servers; OAuth with Microsoft
+- **S3** — for users already on AWS
+
+In memory-only mode the brain directory's local filesystem already covers
+this need, so a binary-storage MCP is purely optional.
+
 ---
 
 ## Task Architecture
@@ -301,6 +381,11 @@ paths, the server file layout after deployment, and the task execution flow.
 ---
 
 ## Optional: Syncing the Brain Directory
+
+> Memory-only mode only. In Agent OS mode there is nothing on the server's
+> filesystem to sync — instructions, dashboard, and outputs all live in
+> ActingWeb. For binaries in Agent OS mode, connect a binary-storage MCP
+> (Dropbox, Google Drive, OneDrive, S3) instead of using filesystem sync.
 
 By default, the brain directory lives locally on the server at `~/brain/`.
 You access files via SSH, the web terminal (ttyd), or ActingWeb tasks.

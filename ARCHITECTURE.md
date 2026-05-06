@@ -49,8 +49,24 @@ claude-code-agent/
 ├── agent-orchestrator.sh       # Main runtime — builds prompt, runs Claude Code
 ├── agent-cli.sh                # Server-side CLI (status, logs, run, inbox, etc.)
 ├── agent-manager.sh            # Local CLI (instance status, wakeup, sleep, SSH)
-└── setup-dropbox.sh            # Optional Dropbox sync
+└── setup-dropbox.sh            # Optional Dropbox sync (memory-only mode)
 ```
+
+### ActingWeb modes
+
+`agent.conf`'s `ACTINGWEB_MODE` flag controls how much state lives on the
+server:
+
+- **`memory`** (default): full brain directory at `~/brain/` — `ai/instructions/`,
+  `INBOX/`, `output/*`, `ACTIONS.md`. Dropbox sync is relevant. The orchestrator
+  reads instructions from disk and writes outputs to disk.
+- **`agentos`**: minimal `~/brain/` containing only `output/logs/` and the
+  heartbeat. Instructions are read from ActingWeb (`instruction_load`) and
+  outputs are written to ActingWeb (`output_create`). Dropbox sync is skipped.
+  Connect a binary-storage MCP (Dropbox, Drive, OneDrive, S3) for attachments.
+
+Both modes share the same EC2 build, scheduler, and MCP registration. See
+`docs/actingweb-modes.md` for the user-facing comparison.
 
 ### What each script does
 

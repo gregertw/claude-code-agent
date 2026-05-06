@@ -3,6 +3,12 @@
 Set up a brain directory on your local machine and use Claude Desktop's Cowork
 feature to work in it.
 
+> **Agent OS mode**: if you chose Agent OS in README Step 2, you do **not**
+> need a brain directory. Skip Step 1 and Step 2 below. Enable Agent OS in
+> the ActingWeb web app, connect the `actingweb` MCP from Claude Desktop /
+> Cowork (Step 3 below), then go straight to README Step 5 (personalization).
+> See [`actingweb-modes.md`](actingweb-modes.md) for details.
+
 ## Prerequisites
 
 - Claude Desktop app installed

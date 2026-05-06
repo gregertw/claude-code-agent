@@ -3,6 +3,12 @@
 This workspace is managed by an AI agent. It can also be used as an
 [Obsidian](https://obsidian.md) vault — the folder structure is compatible.
 
+> **Mode note**: this file is the source of truth in **memory-only** mode. If
+> ActingWeb Agent OS is enabled, the canonical instructions live in ActingWeb
+> — load them with `instruction_load(name="agents" | "tasks" | "default_tasks"
+> | "personal" | "style")` and ignore the local files. The agent should call
+> `how_to_use()` at the start of a session to detect which mode is active.
+
 ## Folder Structure
 
 | Path | Purpose |

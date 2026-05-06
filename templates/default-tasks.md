@@ -10,6 +10,15 @@ tags:
 
 These tasks execute on every scheduled run, in order, before processing inbox or ActingWeb tasks. See [tasks](tasks.md) for execution patterns and logging format.
 
+> **Mode note**: memory-only-mode source of truth. In ActingWeb Agent OS mode
+> the canonical version is `instruction_load(name="default_tasks")` and all
+> `output/*` paths below map to the matching ActingWeb output category
+> (`output/emails/...` → `output_create(category="email", ...)`,
+> `output/news/...` → `category="news"`, `output/research/...` →
+> `category="research"`, `output/improvements/...` → `category="improvement"`,
+> `output/tasks/...` → `category="task"`, `output/logs/...` →
+> `category="log"`).
+
 ---
 
 ## 1. Email Triage

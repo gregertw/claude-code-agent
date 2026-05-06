@@ -66,6 +66,22 @@ AUTO_UPGRADE=true
 # Linux username on the EC2 instance
 UBUNTU_USER="ubuntu"
 
+# --- ActingWeb Mode ----------------------------------------------------------
+# How this server uses ActingWeb. See docs/actingweb-modes.md.
+#
+#   "memory"  — ActingWeb stores cross-session memory only. Instructions live
+#               in ~/brain/ai/instructions/, outputs in ~/brain/output/, the
+#               dashboard in ~/brain/ACTIONS.md, the task queue in ~/brain/INBOX/.
+#               This is the default and works fully offline-style.
+#
+#   "agentos" — ActingWeb stores memory + instructions + outputs. The server
+#               reads instructions via instruction_load() and writes outputs
+#               via output_create(). ~/brain/ holds only run logs and the
+#               heartbeat — no templates, no INBOX, no output subfolders.
+#               Agent OS must be enabled in the ActingWeb web app before
+#               first run, otherwise the agent has no instructions to load.
+ACTINGWEB_MODE="memory"
+
 # --- MCP Connections ---------------------------------------------------------
 # ActingWeb Personal AI Memory (required — provides cross-session memory)
 # Account is automatically created on first /mcp authentication

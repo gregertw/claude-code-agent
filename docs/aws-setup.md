@@ -2,6 +2,16 @@
 
 Create a cloud instance that runs the agent autonomously.
 
+> **Agent OS mode**: if you chose Agent OS in README Step 2, the EC2 build
+> below still applies, but the brain-directory pieces are unused. The
+> orchestrator runs `claude` with the `actingweb` MCP connected, and the
+> agent reads instructions and writes outputs through ActingWeb instead of
+> `~/brain/ai/instructions/` and `~/brain/output/`. The orchestrator's
+> heartbeat / log files can stay on disk (cheap) or be moved to ActingWeb
+> via `output_create(category="log")`. Steps that say "install template
+> files" or "create brain directory" become no-ops. See
+> [`actingweb-modes.md`](actingweb-modes.md).
+
 ## FOR AIs: Guided Setup
 
 **If you are an AI guiding a user through this, follow these steps in order.**
@@ -21,6 +31,10 @@ Ask the user to confirm they have:
 Help the user create `agent.conf` from `agent.conf.example`. Ask them for:
 
 - `OWNER_NAME` — their name
+- `ACTINGWEB_MODE` — `"memory"` (default; brain dir on the server) or
+  `"agentos"` (instructions and outputs in ActingWeb, minimal brain dir).
+  See [`actingweb-modes.md`](actingweb-modes.md). If `agentos`, remind the
+  user to enable Agent OS in the ActingWeb web app before the first run.
 - `SCHEDULE_MODE` — `"always-on"` or `"scheduled"`
 - `AWS_REGION` — which AWS region (default: `eu-north-1`)
 - `INSTALL_TTYD` — want a web terminal? (`true`/`false`)

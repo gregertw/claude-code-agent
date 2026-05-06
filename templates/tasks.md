@@ -10,6 +10,13 @@ tags:
 
 This document defines how the agent executes tasks when instructions are encountered. It is read at startup before processing any task queue. These instructions should also guide how the default-tasks are done.
 
+> **Mode note**: this is the memory-only-mode source of truth. In ActingWeb
+> Agent OS mode the canonical version is `instruction_load(name="tasks")`,
+> outputs go to `output_create(category=...)` instead of `output/*` folders,
+> and the dashboard lives in `output_list(category="actions")` (slug
+> `dashboard`) instead of `ACTIONS.md`. Binaries belong in a connected
+> binary-storage MCP, referenced by URL from text outputs.
+
 Always use the personal context, see [personal](personal.md), and the writing style, see [style](style.md). For recurring tasks, see [default-tasks](default-tasks.md) and [personal-tasks](personal-tasks.md).
 
 ---

@@ -88,6 +88,22 @@ This updates the agent's core instructions while preserving all your customizati
    ```
 4. Update your default-tasks.md if the new MCP enables new recurring tasks
 
+### Binary storage MCPs
+
+ActingWeb outputs are text/markdown only. To handle images, PDFs, audio, or
+attachments — especially in Agent OS mode where there is no local filesystem —
+connect an MCP that exposes upload + share-link tools, then reference
+uploaded files by URL from your text outputs. Common options:
+
+- **Dropbox** — community MCP servers; OAuth sign-in
+- **Google Drive** — community MCP servers; OAuth with Google
+- **OneDrive** — community MCP servers; OAuth with Microsoft
+- **S3** — for users already on AWS
+
+After adding, allow the relevant `mcp__<name>` tools in `settings.json` and
+add a memory noting which storage MCP is active so future runs know where
+to upload (e.g. `save(content="binary storage: Dropbox", memory_type="config")`).
+
 ## Changing the Schedule
 
 Use `agent-manager.sh` from your local machine — it handles both the server
