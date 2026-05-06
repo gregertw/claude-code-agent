@@ -115,8 +115,8 @@ if [[ "${ACTINGWEB_MODE}" == "agentos" ]]; then
     ISSUES=$((ISSUES + 1))
   fi
 
-  echo "  ${DIM}Skipping ai/instructions templates — those live in ActingWeb.${NC}"
-  echo "  ${DIM}Make sure Agent OS is enabled in the ActingWeb web app.${NC}"
+  echo -e "  ${DIM}Skipping ai/instructions templates — those live in ActingWeb.${NC}"
+  echo -e "  ${DIM}Make sure Agent OS is enabled in the ActingWeb web app.${NC}"
 else
   # Memory mode: full brain dir with templates, INBOX, output subdirs.
 
@@ -307,15 +307,17 @@ setup_mcp_server() {
   local label="$1" url_pattern="$2" cloud_name="$3" local_name="$4" url="$5" port="$6"
   local local_prefix="$7" cloud_prefix="$8" test_prompt="$9"
 
-  # Check if already available (locally registered or cloud-synced)
-  local registered=false
-  if is_registered_local "${url_pattern}"; then
-    registered=true
-  elif is_cloud_synced "${cloud_name}"; then
-    registered=true
+  # Cloud-synced servers (claude.ai connectors) are authenticated through the
+  # account login — there is no local /mcp auth step to verify, and the
+  # test-prompt verifier produces false negatives for several of them. Trust
+  # the cloud-synced presence and skip verify.
+  if is_cloud_synced "${cloud_name}"; then
+    ok "${label}: authenticated (cloud-synced)"
+    return
   fi
 
-  if [[ "${registered}" == "false" ]]; then
+  # Locally registered: register if missing, then verify with a real MCP call.
+  if ! is_registered_local "${url_pattern}"; then
     if [[ "${VERIFY_ONLY}" == "true" ]]; then
       need "${label}: not configured"
       ISSUES=$((ISSUES + 1))
@@ -325,7 +327,6 @@ setup_mcp_server() {
     add_mcp_server "${local_name}" "${url}" "${port}"
   fi
 
-  # Verify with a real MCP call
   echo -ne "  ${DIM}  verifying ${label}...${NC}\r"
   if verify_mcp "${local_prefix}" "${cloud_prefix}" "${test_prompt}"; then
     ok "${label}: authenticated"

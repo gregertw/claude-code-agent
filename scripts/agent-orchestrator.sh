@@ -110,7 +110,11 @@ mkdir -p "${LOG_DIR}"
 
 echo "Owner: ${OWNER_NAME}"
 echo "Brain dir: ${BRAIN_DIR}"
-echo "Inbox dir: ${INBOX_DIR}"
+if [[ "${ACTINGWEB_MODE:-memory}" == "memory" ]]; then
+  echo "Inbox dir: ${INBOX_DIR}"
+else
+  echo "Mode: agentos (instructions and outputs in ActingWeb)"
+fi
 echo "Run log: ${RUN_LOG}"
 
 # --- Pre-flight checks -------------------------------------------------------
